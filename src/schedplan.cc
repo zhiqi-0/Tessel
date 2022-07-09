@@ -13,7 +13,7 @@ void SchedPlan::addBlock(Block* block, std::vector<int> devids, int step) {
      */
     if (step >= this->_reserve_steps) this->reserve(step * 2);
     if (this->haveBlock(block)) {
-        throw std::runtime_error("Try to add a block that already exists.");
+        throw std::runtime_error("Try to double-add a block.");
     }
     for (const auto& devid : devids) {
         if (_plans.at(devid)[step] != nullptr) {
@@ -35,7 +35,7 @@ void SchedPlan::addBlock(Block* block, int device, int step) {
      */
     if (step >= this->_reserve_steps) this->reserve(step * 2);
     if (this->haveBlock(block)) {
-        throw std::runtime_error("Try to add a block that already exists.");
+        throw std::runtime_error("Try to double-add a block.");
     }
     if (this->getBlock(device, step) != nullptr) {
         throw std::runtime_error("Try to add a block with conflict postion on others.");

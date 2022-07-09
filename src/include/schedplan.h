@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <string>
 #include <iostream>
+#include <ostream>
 
 #include <unique.h>
 
@@ -69,6 +70,11 @@ class Block {
             return std::string("f") + std::to_string(mid);
         else
             return std::string("b") + std::to_string(mid);
+    }
+
+    friend std::ostream& operator<<(std::ostream& out, Block& block) {
+        out << block.toStr();
+        return out;
     }
 
 };
@@ -171,7 +177,14 @@ class SchedPlan{
 
     void shift(Block* blk);
 
+    // ***** Console Visualize ********
+
     std::string toStr();
+
+    friend std::ostream& operator<<(std::ostream& out, SchedPlan& sched) {
+        out << sched.toStr();
+        return out;
+    }
 
 };
 
