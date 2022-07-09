@@ -108,7 +108,7 @@ class SchedPlan{
 
  public:
     
-    SchedPlan(int ndevs, int nsteps): _ndevs(ndevs), _reserve_steps(nsteps) {
+    SchedPlan(int ndevs = 1, int nsteps = 1): _ndevs(ndevs), _reserve_steps(nsteps) {
         _plans = std::vector<std::vector<Block*>>(ndevs);
         for (int devid = 0; devid < ndevs; ++devid) {
             _plans[devid].resize(nsteps, nullptr);

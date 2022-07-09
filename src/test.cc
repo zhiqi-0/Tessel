@@ -13,8 +13,14 @@
 #include <vector>
 #include <iostream>
 
+#include <string>
 
-SchedPlan test_plan_creation_vshape() {
+
+#define TEST(res, expect) \
+    if (res != expect) \
+        throw std::runtime_error(std::string("fail at line: ")+std::to_string(__LINE__));
+
+SchedPlan test_plan_creation_vshape(int mid = 0) {
     int ndevs = 4;
     SchedPlan micro(ndevs, ndevs);
     std::vector<Block*> fblocks(ndevs, nullptr);
@@ -22,11 +28,11 @@ SchedPlan test_plan_creation_vshape() {
 
     // test addBlock
     for (int devid = 0; devid < ndevs; ++devid) {
-        fblocks[devid] = new Block(0,BlockType::Forward, 1.0, 1.0);
+        fblocks[devid] = new Block(mid ,BlockType::Forward, 1.0, 1.0);
         micro.addBlock(fblocks[devid], devid, devid);
     }
     for (int devid = 0; devid < ndevs; ++devid) {
-        bblocks[devid] = new Block(0,BlockType::Bakward, 1.0, 1.0);
+        bblocks[devid] = new Block(mid ,BlockType::Bakward, 1.0, 1.0);
         std::vector<int> devices = {devid};
         micro.addBlock(bblocks[devid], ndevs-1-devid, ndevs+devid);
     }
@@ -36,9 +42,7 @@ SchedPlan test_plan_creation_vshape() {
     blocks.insert(blocks.end(), bblocks.begin(), bblocks.end());
     Block::addDependencies(blocks);
 
-    if (micro.allBlocks().size() != 8) {
-        throw std::runtime_error("Expected to 8");
-    }
+    TEST(micro.allBlocks().size(), 8)
 
     return micro;
 }
@@ -82,64 +86,74 @@ SchedPlan test_plan_creation_mshape() {
     blocks.insert(blocks.end(), bblocks.begin(), bblocks.end()); 
     Block::addDependencies(blocks);
 
-    if (micro.allBlocks().size() != 10) {
-        throw std::runtime_error("Expected to 8");
-    }
+    TEST(micro.allBlocks().size(), 10)
 
     return micro;
 }
 
 
-int test_schedplan() {
+int test_shift() {
 
-    int ndevs = 4;
-    int nmicros = 4;
+    // test single device block shift
+    SchedPlan sched = test_plan_creation_vshape();
+    Block* fdev0 = sched.getBlock(0, 0);
+    Block* fdev3 = sched.getBlock(3, 3);
+    Block* bdev2 = sched.getBlock(2, 5);
+    Block* bdev0 = sched.getBlock(0, 7);
+    sched.shift(fdev0);
+    sched.shift(fdev3);
+    sched.shift(bdev2);
+    sched.shift(bdev0);
+    std::cout << sched << std::endl;
 
-    SchedPlan micro(ndevs, ndevs);
-    std::vector<Block*> fblocks(ndevs, nullptr);
-    std::vector<Block*> bblocks(ndevs, nullptr);
+    // test multi device block shift
+    SchedPlan msched = test_plan_creation_mshape();
+    Block* mfadev0 = msched.getBlock(0, 0);
+    Block* mfadev1 = msched.getBlock(1, 0);
+    Block* mfdev1 = msched.getBlock(1, 2);
+    msched.shift(mfadev0);
+    msched.shift(mfadev1);
+    msched.shift(mfdev1);
+    std::cout << msched << std::endl;
 
-    // test add
-    for (int devid = 0; devid < ndevs; ++devid) {
-        fblocks[devid] = new Block(0,BlockType::Forward, 1.0, 1.0);
-        micro.addBlock(fblocks[devid], devid, devid);
-    }
-    for (int devid = 0; devid < ndevs; ++devid) {
-        bblocks[devid] = new Block(0,BlockType::Bakward, 1.0, 1.0);
-        std::vector<int> devices = {devid};
-        micro.addBlock(bblocks[devid], ndevs-1-devid, ndevs+devid);
-    }
-    std::cout << "test addBlock done." << std::endl;
-    std::cout << micro.toStr() << std::endl;
-
-    // test add dependency
-    std::vector<Block*> blocks(fblocks);
-    blocks.insert(blocks.end(), bblocks.begin(), bblocks.end());
-    std::cout << "total blocks: " << blocks.size() << std::endl;
-    Block::addDependencies(blocks);
-
-    // test shift
-    micro.shift(fblocks[0]);
-    std::cout << micro.toStr() << std::endl;
-    micro.shift(fblocks[1]);
-    std::cout << micro.toStr() << std::endl;
-    micro.shift(bblocks[2]);
-    micro.shift(bblocks[3]);
-    std::cout << micro.toStr() << std::endl;
-
-    // test memory
-    std::cout << micro.currMemory(0, 5) << " should be 1" << std::endl;
-    std::cout << micro.currMemory(3, 5) << " shoud be 0" << std::endl;
-    std::cout << micro.currMemory(3, 20) << " should be 0" << std::endl;
-    for (int devid = 0; devid < ndevs; ++devid) {
-        std::cout << "peak memory of device "
-                  << devid << " : " << micro.memory(devid) << std::endl;
-    }
-
-    // test bubble rate
-    std::cout << micro.bubble_rate() << " should be " << 1 - 2.0 / (8+4) << std::endl;
-    
     return 0;
+}
+
+
+int test_memory_bubble_rate() {
+    SchedPlan msched = test_plan_creation_mshape();
+    TEST(msched.memory(0), 2.0)
+    TEST(msched.currMemory(0, 1), 1.0)
+    TEST(msched.currMemory(0, 2), 2.0)
+    TEST(msched.currMemory(0, 3), 2.0)
+    TEST(msched.currMemory(0, 100), 0.0)
+    TEST(msched.bubble_rate(), float(0.600))
+    return 0;
+}
+
+int test_stack() {
+
+    int nmicros = 4;
+    int ndevs = 4;
+    std::vector<float> memory(ndevs, float(ndevs));
+    std::vector<SchedPlan> micros(nmicros);
+    for (int mid = 0; mid < nmicros; ++mid) {
+        micros[mid] = test_plan_creation_vshape();
+    }
+
+    for (int idx = 0; idx < nmicros; idx++) {
+        auto blk = micros[idx].getBlock(0, 0);
+        for (int t = 0; t < idx * 2; ++t) {
+            micros[idx].shift(blk);
+        }
+        std::cout << micros[idx] << std::endl;
+    }
+
+    TEST(SchedPlan::stackable(micros, memory), true)
+    SchedPlan sched = SchedPlan::stack(micros);
+    std::cout << sched << std::endl;
+    TEST(sched.nSteps(), 14)
+
 }
 
 
@@ -149,5 +163,10 @@ int main() {
     std::cout << micro1 << std::endl;
     SchedPlan micro2 = test_plan_creation_mshape();
     std::cout << micro2 << std::endl;
+
+    test_shift();
+    test_memory_bubble_rate();
+    test_stack();
+
     return 0;
 }

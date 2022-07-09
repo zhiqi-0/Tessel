@@ -297,8 +297,8 @@ SchedPlan SchedPlan::stack(std::vector<SchedPlan>& plans) {
     SchedPlan sched(ndevs, nsteps);
     for (auto& plan: plans) {
         for (auto blk : plan.allBlocks()) {
-            auto devices = sched.getDevice(blk);
-            int step = sched.getStep(blk);
+            auto devices = plan.getDevice(blk);
+            int step = plan.getStep(blk);
             sched.addBlock(blk, devices, step);
         }
     }
