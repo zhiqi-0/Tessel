@@ -31,7 +31,10 @@ class Block {
         this->mid = mid;
         this->btype = btype;
         this->span = span;
-        this->memory = std::abs(memory);
+        if (btype == BlockType::Forward)
+            this->memory = std::abs(memory);
+        else
+            this->memory = 0.0 - std::abs(memory);
         this->span = span;
         _uid = UniqueID::GetInstance()->GetUid();
     }
