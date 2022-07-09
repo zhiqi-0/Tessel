@@ -65,14 +65,14 @@ class Block {
         }
     }
 
-    std::string toStr() {
+    std::string toStr() const {
         if (btype == BlockType::Forward)
-            return std::string("f") + std::to_string(mid);
+            return std::string("f") + std::to_string(this->mid);
         else
-            return std::string("b") + std::to_string(mid);
+            return std::string("b") + std::to_string(this->mid);
     }
 
-    friend std::ostream& operator<<(std::ostream& out, Block& block) {
+    friend std::ostream& operator<<(std::ostream& out, const Block& block) {
         out << block.toStr();
         return out;
     }
@@ -98,25 +98,19 @@ class SchedPlan{
          * @brief reserve the step
          * 
          */
-        if (nsteps > _reserve_steps) {
+        if (nsteps > this->_reserve_steps) {
             for (int devid = 0; devid < _ndevs; ++devid) {
-                _plans[devid].resize(nsteps, nullptr);
+                this->_plans[devid].resize(nsteps, nullptr);
             }
-            _reserve_steps = nsteps;
+            this->_reserve_steps = nsteps;
         }
     }
 
  public:
     
-    SchedPlan(int ndevs = 1, int nsteps = 1): _ndevs(ndevs), _reserve_steps(nsteps) {
-        _plans = std::vector<std::vector<Block*>>(ndevs);
-        for (int devid = 0; devid < ndevs; ++devid) {
-            _plans[devid].resize(nsteps, nullptr);
-        }
+    SchedPlan(int ndevs = 1, int nsteps = 1);
 
-    }
-
-    SchedPlan(const SchedPlan& plan) {}
+    SchedPlan(const SchedPlan& plan);
 
     // ***** Plan Modifier ********
 
@@ -128,44 +122,44 @@ class SchedPlan{
 
     // ***** Plan Property ********
 
-    inline int nDevs() { return this->_ndevs; }
+    inline int nDevs() const { return this->_ndevs; }
 
-    inline int nSteps() { return this->_maxsteps + 1; }
+    inline int nSteps() const { return this->_maxsteps + 1; }
 
-    float memory(int devid);
+    inline int nReserveSteps() const { return this->_reserve_steps; }
 
-    float currMemory(int devid, int to_step = -1);
+    float memory(int devid) const;
 
-    float bubble_rate();
+    float currMemory(int devid, int to_step = -1) const;
+
+    float bubble_rate() const;
 
     // ***** Plan Block Access ********
 
-    std::vector<int> getDevice(Block* blk);
+    std::vector<int> getDevice(Block* blk) const;
 
-    int getStep(Block* blk);
+    int getStep(Block* blk) const;
 
-    inline Block* getBlock(const int devid, const int step) {
-        if (step >= this->nSteps())
-            return nullptr;
-        else
-            return _plans.at(devid).at(step);
+    inline Block* getBlock(const int devid, const int step) const {
+        // std::cout << "access step: " << step << " devid: " << devid << " size: " << this->_plans[devid].size() << std::endl;
+        return (devid >= this->_ndevs or step > this->_maxsteps) ? nullptr : this->_plans.at(devid).at(step);
     }
 
-    const std::set<Block*> allBlocks() { return _blocks; }
+    const std::set<Block*> allBlocks() const { return _blocks; }
 
-    std::vector<Block*> stepBlocks(int step);
+    std::vector<Block*> stepBlocks(int step) const;
 
-    std::vector<Block*> devBlocks(int devid, int start_step, int end_step = -1);
+    std::vector<Block*> devBlocks(int devid, int start_step, int end_step = -1) const;
 
-    inline bool haveBlock(Block* block) { return _blocks.find(block) != _blocks.end(); }
+    inline bool haveBlock(Block* block) const { return _blocks.find(block) != _blocks.end(); }
 
     // ***** Plan Selection and Creation ********
 
-    SchedPlan selectSteps(int from_step, int to_step);
+    SchedPlan selectSteps(int from_step, int to_step) const;
 
-    SchedPlan selectBlocks(const std::set<Block*>& blocks);
+    SchedPlan selectBlocks(const std::set<Block*>& blocks) const;
 
-    SchedPlan selectMicros(const std::set<int>& micro_ids);
+    SchedPlan selectMicros(const std::set<int>& micro_ids) const;
 
     static SchedPlan concat(std::vector<SchedPlan>& plans);
 
@@ -179,9 +173,9 @@ class SchedPlan{
 
     // ***** Console Visualize ********
 
-    std::string toStr();
+    std::string toStr() const;
 
-    friend std::ostream& operator<<(std::ostream& out, SchedPlan& sched) {
+    friend std::ostream& operator<<(std::ostream& out, const SchedPlan& sched) {
         out << sched.toStr();
         return out;
     }

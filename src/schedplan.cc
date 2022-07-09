@@ -2,6 +2,33 @@
 #include <unique.h>
 #include <iostream>
 
+// ***** Plan Constructor ********
+
+SchedPlan::SchedPlan(int ndevs, int nsteps): _ndevs(ndevs), _reserve_steps(nsteps) {
+    this->_plans = std::vector<std::vector<Block*>>(ndevs);
+    for (int devid = 0; devid < ndevs; ++devid) {
+        this->_plans[devid].resize(nsteps, nullptr);
+    }
+}
+
+
+SchedPlan::SchedPlan(const SchedPlan& plan) {
+    std::cout << "copy constructor: " << plan.allBlocks().size() << std::endl;
+    std::cout << plan << std::endl;
+    this->_ndevs = plan.nDevs();
+    this->_maxsteps = plan.nSteps() - 1;
+    this->_reserve_steps = plan.nReserveSteps();
+    this->_plans = std::vector< std::vector<Block*> >(this->_ndevs);
+    for (int devid = 0; devid < this->_ndevs; ++devid) {
+        this->_plans[devid].resize(this->_reserve_steps, nullptr);
+    }
+    for (auto blk : plan.allBlocks()) {
+        auto device = plan.getDevice(blk);
+        int step = plan.getStep(blk);
+        this->addBlock(blk, device, step);
+    }
+    std::cout << "finished copy: \n" << *this << std::endl;
+}
 
 
 // ***** Plan Modifier ********
@@ -24,7 +51,7 @@ void SchedPlan::addBlock(Block* block, std::vector<int> devids, int step) {
     this->_blocks.insert(block);
     this->_block_devices.emplace(block, devids);
     this->_block_steps.emplace(block, step);
-    this->_maxsteps = std::max(_maxsteps, step);
+    this->_maxsteps = std::max(this->_maxsteps, step);
 }
 
 
@@ -76,11 +103,11 @@ void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
 // ***** Plan Property ********
 
 
-float SchedPlan::memory(int devid) {
+float SchedPlan::memory(int devid) const {
     float peak_mem = 0.0;
     float mem = 0.0;
     for (int step = 0; step < nSteps(); ++step) {
-        Block* blk = _plans[devid][step];
+        Block* blk = this->_plans[devid][step];
         if (blk != nullptr) {
             mem += blk->memory;
             peak_mem = std::max(peak_mem, mem);
@@ -90,7 +117,7 @@ float SchedPlan::memory(int devid) {
 }
 
 
-float SchedPlan::currMemory(int devid, int to_step) {
+float SchedPlan::currMemory(int devid, int to_step) const {
     /**
      * @brief Get current memory of device devid until to_step
      * 
@@ -100,7 +127,7 @@ float SchedPlan::currMemory(int devid, int to_step) {
         to_step = this->nSteps();
     }
     for (int step = 0; step < to_step; ++step) {
-        Block* blk = _plans.at(devid).at(step);
+        Block* blk = this->_plans.at(devid).at(step);
         if (blk != nullptr) {
             mem += blk->memory;
         }
@@ -109,7 +136,7 @@ float SchedPlan::currMemory(int devid, int to_step) {
 }
 
 
-float SchedPlan::bubble_rate() {
+float SchedPlan::bubble_rate() const {
     /**
      * @brief get bubble rate of this plan
      * 
@@ -129,19 +156,19 @@ float SchedPlan::bubble_rate() {
 // ***** Plan Block Access ********
 
 
-std::vector<int> SchedPlan::getDevice(Block* blk) {
+std::vector<int> SchedPlan::getDevice(Block* blk) const {
     /**
      * @brief Get block devices
      * 
      */
-    if (!haveBlock(blk)) {
+    if (!this->haveBlock(blk)) {
         throw std::runtime_error("block not exists");
     }
     return this->_block_devices.find(blk)->second;
 }
 
 
-int SchedPlan::getStep(Block* blk) {
+int SchedPlan::getStep(Block* blk) const {
     /**
      * @brief Get block steps
      * 
@@ -153,7 +180,7 @@ int SchedPlan::getStep(Block* blk) {
 }
 
 
-std::vector<Block*> SchedPlan::stepBlocks(int step) {
+std::vector<Block*> SchedPlan::stepBlocks(int step) const {
     /**
      * @brief Get blocks on a step
      * 
@@ -169,7 +196,7 @@ std::vector<Block*> SchedPlan::stepBlocks(int step) {
 }
 
 
-std::vector<Block*> SchedPlan::devBlocks(int devid, int start_step, int end_step) {
+std::vector<Block*> SchedPlan::devBlocks(int devid, int start_step, int end_step) const {
     /**
      * @brief Get blocks on a device
      * 
@@ -191,7 +218,7 @@ std::vector<Block*> SchedPlan::devBlocks(int devid, int start_step, int end_step
 // ***** Plan Selection and Creation ********
 
 
-SchedPlan SchedPlan::selectSteps(int from_step, int to_step) {
+SchedPlan SchedPlan::selectSteps(int from_step, int to_step) const {
     SchedPlan sched(_ndevs, _reserve_steps);
     for (int step = from_step; step < to_step; ++step) {
         for (auto blk : stepBlocks(step)) {
@@ -204,7 +231,7 @@ SchedPlan SchedPlan::selectSteps(int from_step, int to_step) {
 }
 
 
-SchedPlan SchedPlan::selectBlocks(const std::set<Block*>& blocks) {
+SchedPlan SchedPlan::selectBlocks(const std::set<Block*>& blocks) const {
     /**
      * @brief Create a schedule plan only containing the set of blocks.
      * 
@@ -219,7 +246,7 @@ SchedPlan SchedPlan::selectBlocks(const std::set<Block*>& blocks) {
 }
 
 
-SchedPlan SchedPlan::selectMicros(const std::set<int>& micro_ids) {
+SchedPlan SchedPlan::selectMicros(const std::set<int>& micro_ids) const {
     /**
      * @brief Create a schedule plan only containing blocks of certain micro ids.
      * 
@@ -242,19 +269,19 @@ SchedPlan SchedPlan::concat(std::vector<SchedPlan>& plans) {
      * 
      */
     int nsteps = 0;
-    for (auto& sched : plans) {
-        nsteps += sched.nSteps();
+    for (auto& plan : plans) {
+        nsteps += plan.nSteps();
     }
     int ndevs = plans[0].nDevs();
     SchedPlan sched(ndevs, nsteps);
     int ofst = 0;
-    for (auto& sched: plans) {
-        for (auto& blk : sched.allBlocks()) {
-            auto devices = sched.getDevice(blk);
-            int step = sched.getStep(blk);
+    for (auto& plan: plans) {
+        for (auto blk : plan.allBlocks()) {
+            auto devices = plan.getDevice(blk);
+            int step = plan.getStep(blk);
             sched.addBlock(blk, devices, step+ofst);
         }
-        ofst += sched.nSteps();
+        ofst += plan.nSteps();
     }
     return sched;
 }
@@ -335,12 +362,11 @@ void SchedPlan::shift(Block* blk) {
 // ***** Plan String ********
 
 
-std::string SchedPlan::toStr() {
-    Block* blk = nullptr;
+std::string SchedPlan::toStr() const {
     std::string dscp;
     for (int devid = 0; devid < this->nDevs(); ++devid) {
         for (int step = 0; step < this->nSteps(); ++step) {
-            blk = this->getBlock(devid, step);
+            Block* blk = this->getBlock(devid, step);
             if (blk == nullptr)
                 dscp += "-- ";
             else

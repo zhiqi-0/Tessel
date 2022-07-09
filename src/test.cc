@@ -131,6 +131,7 @@ int test_memory_bubble_rate() {
     return 0;
 }
 
+
 int test_stack() {
 
     int nmicros = 4;
@@ -157,6 +158,16 @@ int test_stack() {
 }
 
 
+void test_concat() {
+    std::vector<SchedPlan> plans;
+    plans.push_back(test_plan_creation_vshape());
+    plans.push_back(test_plan_creation_mshape());
+    SchedPlan csched = SchedPlan::concat(plans);
+    std::cout << csched;
+
+}
+
+
 
 int main() {
     SchedPlan micro1 = test_plan_creation_vshape();
@@ -167,6 +178,7 @@ int main() {
     test_shift();
     test_memory_bubble_rate();
     test_stack();
+    test_concat();
 
     return 0;
 }
