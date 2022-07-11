@@ -20,12 +20,10 @@ class UniqueID {
         return uinstance;
     }
 
-    int GetUid() {
+    inline int GetUid() {
         uid += 1;
         return uid;
     }
 
     ~UniqueID() {}
 };
-
-UniqueID* UniqueID::uinstance = nullptr;
