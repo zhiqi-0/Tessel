@@ -122,10 +122,10 @@ int test_shift() {
 
 int test_memory_bubble_rate() {
     SchedPlan msched = test_plan_creation_mshape();
-    TEST(msched.memory(0), 2.0)
-    TEST(msched.currMemory(0, 1), 1.0)
-    TEST(msched.currMemory(0, 2), 2.0)
-    TEST(msched.currMemory(0, 3), 2.0)
+    TEST(msched.peakMemory(0), 2.0)
+    TEST(msched.currMemory(0, 0, 1), 1.0)
+    TEST(msched.currMemory(0, 0, 2), 2.0)
+    TEST(msched.currMemory(0, 0, 3), 2.0)
     TEST(msched.currMemory(0, 100), 0.0)
     TEST(msched.bubble_rate(), float(0.600))
     return 0;

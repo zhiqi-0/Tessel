@@ -103,10 +103,12 @@ void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
 // ***** Plan Property ********
 
 
-float SchedPlan::memory(int devid) const {
+float SchedPlan::peakMemory(int devid, int from_step, int to_step) const {
     float peak_mem = 0.0;
     float mem = 0.0;
-    for (int step = 0; step < nSteps(); ++step) {
+    from_step = std::max(0, from_step);
+    to_step = (to_step == -1 or to_step > this->nSteps()) ? nSteps() : to_step;
+    for (int step = from_step; step < to_step; ++step) {
         Block* blk = this->_plans[devid][step];
         if (blk != nullptr) {
             mem += blk->memory;
@@ -117,16 +119,15 @@ float SchedPlan::memory(int devid) const {
 }
 
 
-float SchedPlan::currMemory(int devid, int to_step) const {
+float SchedPlan::currMemory(int devid, int from_step, int to_step) const {
     /**
      * @brief Get current memory of device devid until to_step
      * 
      */
     float mem = 0.0;
-    if (to_step == -1 or to_step > this->_maxsteps) {
-        to_step = this->nSteps();
-    }
-    for (int step = 0; step < to_step; ++step) {
+    from_step = std::max(0, from_step);
+    to_step = (to_step == -1 or to_step > this->nSteps()) ? nSteps() : to_step;
+    for (int step = from_step; step < to_step; ++step) {
         Block* blk = this->_plans.at(devid).at(step);
         if (blk != nullptr) {
             mem += blk->memory;

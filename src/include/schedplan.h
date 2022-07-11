@@ -128,9 +128,9 @@ class SchedPlan{
 
     inline int nReserveSteps() const { return this->_reserve_steps; }
 
-    float memory(int devid) const;
+    float peakMemory(int devid, int from_step = 0, int to_step = -1) const;
 
-    float currMemory(int devid, int to_step = -1) const;
+    float currMemory(int devid, int from_step = 0, int to_step = -1) const;
 
     float bubble_rate() const;
 
