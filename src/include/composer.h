@@ -55,7 +55,10 @@ class Conflict {
         else {
             this->device2blocks[devid].insert(blk);
         }
-        this->block2device.emplace(blk, devid);
+        if (this->block2device.find(blk) == this->block2device.end()) {
+            this->block2device.emplace(blk, std::vector<int>());
+        }
+        this->block2device[blk].push_back(devid);
     }
 
     inline std::vector<int> getDevice(Block* blk) const { return this->block2device.find(blk)->second; }
@@ -76,6 +79,21 @@ class Conflict {
             return std::set<Block*>();
         }
         return this->device2blocks.find(devid)->second;
+    }
+
+    friend std::ostream& operator<<(std::ostream& out, const Conflict& sched) {
+        out << "Conflict: ";
+        for (const auto it : sched.device2blocks) {
+            if (it.second.size() == 0) {
+                continue;
+            }
+            out << "dev" << it.first << "(";
+            for (auto blk : it.second) {
+                out << " " << blk->toStr();
+            }
+            out << " ) ";
+        }
+        return out;
     }
 };
 

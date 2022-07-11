@@ -7,7 +7,7 @@ LIBS = -lstdc++
 
 BUILD = build
 
-all: ${BUILD}/libtetris.so test
+all: ${BUILD}/libtetris.so ${BUILD}/test ${BUILD}/cases
 
 ${BUILD}/unique.o: include/unique.h unique.cc
 	mkdir -p ${BUILD}
@@ -24,12 +24,13 @@ ${BUILD}/composer.o: include/unique.h include/schedplan.h include/composer.h com
 ${BUILD}/libtetris.so: ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o
 	$(CXX) $(CPPFLAGS) -shared -o ${BUILD}/libtetris.so ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${LIBS}
 
-test: test.cc ${BUILD}/libtetris.so
-	$(CXX) $(CPPFLAGS) test.cc -o test -L./build/ -Wl,-rpath=./build -ltetris
+${BUILD}/test: examples/test.cc ${BUILD}/libtetris.so
+	$(CXX) $(CPPFLAGS) examples/test.cc -o ${BUILD}/test -L./build/ -Wl,-rpath=./build -ltetris
+
+
+${BUILD}/cases: examples/cases.cc ${BUILD}/libtetris.so
+	$(CXX) $(CPPFLAGS) examples/cases.cc -o ${BUILD}/cases -L./build/ -Wl,-rpath=./build -ltetris
 
 
 clean:
-	rm -rf *.so
-	rm -rf *.o
-	rm test
 	rm -rf ./build

@@ -154,7 +154,7 @@ int test_stack() {
     SchedPlan sched = SchedPlan::stack(micros);
     std::cout << sched << std::endl;
     TEST(sched.nSteps(), 14)
-
+    return 0;
 }
 
 

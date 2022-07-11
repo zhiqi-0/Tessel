@@ -118,7 +118,7 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
         }
         for (auto& sched : schedules) {
             if (sched.nSteps() < opt_step) {
-                if (!silence) std::cout << "find fewer steps: " << sched.nSteps();
+                if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
                 opt_step = sched.nSteps();
             }
         }
@@ -126,9 +126,13 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
         total_status += next.size();
         curr.clear();
         std::swap(curr, next);
+        ++step;
     }
 
-    if (!silence) std::cout << "search done on " << total_status << " cases." << std::endl;
+    if (!silence) {
+        std::cout << "search done on " << total_status << " cases. "
+                  << "find " << schedules.size() << " tight step-optimal plans" << std::endl;
+    }
     return schedules;
 }
 
@@ -146,28 +150,36 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
     Conflict step_conflict = Composer::getStepConflict(
         micros, step, blk2hash
     );
+    // std::cout << "step conflict: " << step_conflict << std::endl;
     Conflict mem_conflict = Composer::getMemConflict(
         micros, step, memory, blk2hash
     );
+    // std::cout << "memory conflict: " << mem_conflict << std::endl;
 
     std::vector< std::set<Block*> > all_shifts = Composer::getShiftSpace(
         ndevs, step_conflict, mem_conflict, blk2hash
     );
 
+    // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
     for (auto& shifts : all_shifts) {
+        // std::cout << "shift: ";
+        // for (auto blk : shifts) std::cout << *blk << " ";
+        // std::cout << std::endl;
+        // int _x; std::cin >> _x;
+
         // copy for inplacement update
         Plans cmicros(micros);
         for (auto blk : shifts) {
             int idx = blk2idx[blk];
             cmicros[idx].shift(blk);
         }
+        // std::cout << "prev:\n"; for (auto& micro : cmicros) std::cout << micro << std::endl;
         if (SchedPlan::stackable(cmicros, memory)) {
             SchedPlan sched = SchedPlan::stack(cmicros);
             upper_opt_step = std::min(sched.nSteps(), upper_opt_step);
             if (sched.nSteps() <= upper_opt_step) {
                 schedules.push_back(sched);
             }
-
         }
         else {
             // pruning technique: discard plans that exceed opt_step
@@ -202,6 +214,13 @@ Composer::getShiftSpace(const int ndevice,
             }
         }
     }
+    // for (auto& it : keep_candidates) {
+    //     std::cout << "keep candidates: " << it.first << " : blocks: ";
+    //     for (auto blk : it.second) {
+    //         std::cout << " " << *blk;
+    //     }
+    //     std::cout << std::endl;
+    // }
 
     std::vector< std::vector<Block*> > curr;  // current kept block
     std::vector< std::vector<Block*> > next;  // next kept block
@@ -263,9 +282,10 @@ Composer::getShiftSpace(const int ndevice,
         std::set<Block*> shifts;
         for (int devid = 0; devid < ndevice; ++devid) {
             Block* kblock = keep_blks[devid];
-            if (kblock == nullptr) continue;
             for (auto cblock : step_conflict.getDeviceBlocks(devid)) {
-                shifts.insert(cblock);
+                if (cblock != nullptr and cblock != kblock) {
+                    shifts.insert(cblock);
+                }
             }
             for (auto cblock : mem_conflict.getDeviceBlocks(devid)) {
                 shifts.insert(cblock);
@@ -317,7 +337,8 @@ Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step
             bool need_shift = false;
             for (int dev : devs) {
                 // pre-memory
-                if (devmem[dev] + blk->memory > memory[dev]) {
+                float min_peak_mem = devmem[dev] + blk->memory;
+                if (min_peak_mem > memory[dev]) {
                     need_shift = true;
                     break;
                 }
@@ -337,7 +358,8 @@ Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step
                         );
                     }
                 }
-                if (devmem[dev] + blk->memory + min_remain_peak_mem > memory[dev]) {
+                min_peak_mem = devmem[dev] + blk->memory + min_remain_peak_mem;
+                if (min_peak_mem > memory[dev]) {
                     need_shift = true;
                     break;
                 }

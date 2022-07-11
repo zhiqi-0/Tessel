@@ -1,6 +1,7 @@
 #include <schedplan.h>
 #include <unique.h>
 #include <iostream>
+#include <limits>
 
 // ***** Plan Constructor ********
 
@@ -13,8 +14,6 @@ SchedPlan::SchedPlan(int ndevs, int nsteps): _ndevs(ndevs), _reserve_steps(nstep
 
 
 SchedPlan::SchedPlan(const SchedPlan& plan) {
-    std::cout << "copy constructor: " << plan.allBlocks().size() << std::endl;
-    std::cout << plan << std::endl;
     this->_ndevs = plan.nDevs();
     this->_maxsteps = plan.nSteps() - 1;
     this->_reserve_steps = plan.nReserveSteps();
@@ -27,7 +26,6 @@ SchedPlan::SchedPlan(const SchedPlan& plan) {
         int step = plan.getStep(blk);
         this->addBlock(blk, device, step);
     }
-    std::cout << "finished copy: \n" << *this << std::endl;
 }
 
 
@@ -104,8 +102,8 @@ void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
 
 
 float SchedPlan::peakMemory(int devid, int from_step, int to_step) const {
-    float peak_mem = 0.0;
-    float mem = 0.0;
+    float peak_mem = -std::numeric_limits<float>::max();
+    float mem = 0;
     from_step = std::max(0, from_step);
     to_step = (to_step == -1 or to_step > this->nSteps()) ? nSteps() : to_step;
     for (int step = from_step; step < to_step; ++step) {
@@ -124,7 +122,7 @@ float SchedPlan::currMemory(int devid, int from_step, int to_step) const {
      * @brief Get current memory of device devid until to_step
      * 
      */
-    float mem = 0.0;
+    float mem = 0;
     from_step = std::max(0, from_step);
     to_step = (to_step == -1 or to_step > this->nSteps()) ? nSteps() : to_step;
     for (int step = from_step; step < to_step; ++step) {
@@ -163,7 +161,7 @@ std::vector<int> SchedPlan::getDevice(Block* blk) const {
      * 
      */
     if (!this->haveBlock(blk)) {
-        throw std::runtime_error("block not exists");
+        throw std::runtime_error("SchedPlan::getDevice: block not exists");
     }
     return this->_block_devices.find(blk)->second;
 }
@@ -175,7 +173,7 @@ int SchedPlan::getStep(Block* blk) const {
      * 
      */
     if (!this->haveBlock(blk)) {
-        throw std::runtime_error("block not exists");
+        throw std::runtime_error("SchedPlan::getStep: block not exists");
     }
     return this->_block_steps.find(blk)->second;
 }
@@ -187,6 +185,7 @@ std::vector<Block*> SchedPlan::stepBlocks(int step) const {
      * 
      */
     std::vector<Block*> blks;
+    if (step >= this->nSteps()) return blks;
     for (int devid = 0; devid < _ndevs; ++devid) {
         Block* blk = _plans[devid][step];
         if (blk != nullptr) {
@@ -367,6 +366,8 @@ std::string SchedPlan::toStr() const {
     std::string dscp;
     for (int devid = 0; devid < this->nDevs(); ++devid) {
         for (int step = 0; step < this->nSteps(); ++step) {
+            // std::cout << "devid, step: " << devid << " " << step << std::endl;
+            // std::cout << "length: " << this->_plans.at(devid).size() << std::endl;
             Block* blk = this->getBlock(devid, step);
             if (blk == nullptr)
                 dscp += "-- ";
