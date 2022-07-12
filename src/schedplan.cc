@@ -135,20 +135,22 @@ float SchedPlan::currMemory(int devid, int from_step, int to_step) const {
 }
 
 
-float SchedPlan::bubble_rate() const {
+float SchedPlan::bubble_rate(int from_step, int to_step) const {
     /**
      * @brief get bubble rate of this plan
      * 
      */
     float nbubbles = 0;
+    from_step = std::max(0, from_step);
+    to_step = (to_step == -1 or to_step > this->nSteps()) ? nSteps() : to_step;
     for (int devid = 0; devid < nDevs(); ++devid) {
-        for (int step = 0; step < nSteps(); ++step) {
+        for (int step = from_step; step < to_step; ++step) {
             if (_plans[devid][step] == nullptr) {
                 nbubbles += 1;
             }
         }
     }
-    return nbubbles / float(nDevs() * nSteps());
+    return nbubbles / float(nDevs() * (to_step - from_step));
 }
 
 
@@ -258,6 +260,45 @@ SchedPlan SchedPlan::selectMicros(const std::set<int>& micro_ids) const {
             int step = this->getStep(blk);
             sched.addBlock(blk, devids, step);
         }
+    }
+    return sched;
+}
+
+
+SchedPlan SchedPlan::increaseMid(const int increase_mid) const {
+    /**
+     * @brief Increase micro batch id for each block in the micro.
+     * The result will be in a new instance.
+     * 
+     * @warning this will allocate memory for blocks, user should
+     * manually delete them after finished the use.
+     */
+    SchedPlan sched(this->nDevs(), this->nReserveSteps());
+    std::unordered_map<Block*, Block*> replace;
+
+    for (auto blk : this->allBlocks()) {
+        Block* iblock = new Block(blk->mid + increase_mid, blk->btype, blk->memory, blk->span);
+        replace.emplace(blk, iblock);
+    }
+    // change forward backward relation shape
+    for (auto& it : replace) {
+        Block* old = it.first;
+        Block* inc = it.second;
+        std::set<Block*> before;
+        std::set<Block*> after;
+        for (auto bblk : old->before) {
+            if (replace.find(bblk) != replace.end()) {
+                before.insert(replace[bblk]);
+            }
+        }
+        for (auto ablk : old->after) {
+            if (replace.find(ablk) != replace.end()) {
+                after.insert(replace[ablk]);
+            }
+        }
+        inc->after = after;
+        inc->before = before;
+        sched.addBlock(inc, this->getDevice(old), this->getStep(old));
     }
     return sched;
 }
@@ -389,3 +430,59 @@ std::string SchedPlan::toStr() const {
     }
     return dscp;
 }
+
+
+// ********** GeneralPlan **********
+
+GeneralSchedPlan::GeneralSchedPlan(const SchedPlan& lhead, const SchedPlan& steady, const SchedPlan& rtail)
+  : SchedPlan(steady.nDevs(), lhead.nSteps() + steady.nSteps() + rtail.nSteps()) {
+    _lbound = lhead.nSteps();
+    _rbound = _lbound + steady.nSteps();
+    int ofst = 0;
+    for (auto blk : lhead.allBlocks()) {
+        this->addBlock(blk, lhead.getDevice(blk), lhead.getStep(blk) + ofst);
+    }
+    ofst += lhead.nSteps();
+    for (auto blk : steady.allBlocks()) {
+        this->addBlock(blk, steady.getDevice(blk), steady.getStep(blk) + ofst);
+    }
+    ofst += steady.nSteps();
+    for (auto blk : rtail.allBlocks()) {
+        this->addBlock(blk, rtail.getDevice(blk), rtail.getStep(blk) + ofst);
+    }
+}
+
+
+GeneralSchedPlan::GeneralSchedPlan(const GeneralSchedPlan& plan)
+  : SchedPlan(plan) {
+    _lbound = plan.getLBound();
+    _rbound = plan.getRBound();
+    _created = plan.getCreatedBlocks();
+}
+
+
+void GeneralSchedPlan::destroyCreatedBlocks() {
+    for (auto blk : _created) {
+        delete blk;
+    }
+}
+
+
+std::string GeneralSchedPlan::toStr() const {
+    std::string dscp;
+    for (int devid = 0; devid < this->nDevs(); ++devid) {
+        for (int step = 0; step < this->nSteps(); ++step) {
+            if (step == _lbound or step == _rbound) {
+                dscp += "| ";
+            }
+            Block* blk = this->getBlock(devid, step);
+            if (blk == nullptr)
+                dscp += "-- ";
+            else
+                dscp += blk->toStr() + " ";
+        }
+        dscp += "\n";
+    }
+    return dscp;
+}
+

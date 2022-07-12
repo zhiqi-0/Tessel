@@ -25,7 +25,7 @@ Block2Hash::Block2Hash(const std::vector<SchedPlan>& plans) {
             same_groups.push_back(Plans({plan}));
         }
     }
-    std::cout << "Got " << same_groups.size() << " groups" << std::endl;
+    // std::cout << "Got " << same_groups.size() << " groups" << std::endl;
     for (auto& group : same_groups) {
         int ndevs = group[0].nDevs();
         int nsteps = group[0].nSteps();

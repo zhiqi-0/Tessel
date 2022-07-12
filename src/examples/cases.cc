@@ -13,13 +13,15 @@
 #include <vector>
 #include <iostream>
 #include <string>
+#include <functional>
+#include <chrono>
+
 #include <schedplan.h>
 #include <composer.h>
+#include <generalizer.h>
+
 #include <parser.h>
 
-#include <functional>
-
-#include <chrono>
 
 typedef Plans (PremiseFunc)(int, int);
 
@@ -188,6 +190,26 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         std::cout << "one solution:\n" << opt_plans[0] << std::endl;
     }
     // for (int idx = 0; idx < opt_plans.size(); ++idx) { std::cout << "plan#" << idx << ":\n" << opt_plans[idx] << std::endl;}
+
+    GeneralSchedPlan best_plan;
+    float min_bubble_rate = 1.0;
+    for (auto& opt_plan : opt_plans) {
+        GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
+            opt_plan, memory, 1
+        );
+        float bubble_rate = gsched.steady_bubble_rate();
+        if (bubble_rate < min_bubble_rate) {
+            min_bubble_rate = bubble_rate;
+            std::cout << "find generalized plan with bubble rate: "
+                      << min_bubble_rate << std::endl;
+            std::cout << gsched << std::endl;
+            best_plan.destroyCreatedBlocks();
+            best_plan = gsched;
+        }
+        else {
+            gsched.destroyCreatedBlocks();
+        }
+    }
 }
 
 

@@ -132,7 +132,7 @@ class SchedPlan{
 
     float currMemory(int devid, int from_step = 0, int to_step = -1) const;
 
-    float bubble_rate() const;
+    float bubble_rate(int from_step = 0, int to_step = -1) const;
 
     // ***** Plan Block Access ********
 
@@ -161,6 +161,8 @@ class SchedPlan{
 
     SchedPlan selectMicros(const std::set<int>& micro_ids) const;
 
+    SchedPlan increaseMid(const int increase_mid) const;
+
     static SchedPlan concat(std::vector<SchedPlan>& plans);
 
     static bool stackable(std::vector<SchedPlan>& plans, const std::vector<float>& memory);
@@ -182,3 +184,35 @@ class SchedPlan{
 
 };
 
+
+class GeneralSchedPlan: public SchedPlan {
+
+ public:
+
+    GeneralSchedPlan(): SchedPlan() {}
+
+    GeneralSchedPlan(const SchedPlan& lhead, const SchedPlan& steady, const SchedPlan& rtail);
+
+    GeneralSchedPlan(const GeneralSchedPlan&);
+
+    inline const int getLBound() const { return _lbound; }
+    inline const int getRBound() const { return _rbound; }
+    inline std::set<Block*> getCreatedBlocks() const {return _created;}
+    void addCreatedBlocks(Block* blk) { _created.insert(blk); }
+    void destroyCreatedBlocks();
+
+    float steady_bubble_rate() const { return bubble_rate(_lbound, _rbound); }
+
+    std::string toStr() const;
+
+    friend std::ostream& operator<<(std::ostream& out, const GeneralSchedPlan& sched) {
+        out << sched.toStr();
+        return out;
+    }
+
+
+ private:
+    int _lbound;
+    int _rbound;
+    std::set<Block*> _created;
+};

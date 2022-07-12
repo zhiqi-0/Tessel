@@ -17,12 +17,15 @@ ${BUILD}/schedplan.o: include/schedplan.h include/unique.h schedplan.cc
 	mkdir -p ${BUILD}
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/schedplan.o -c schedplan.cc
 
-${BUILD}/composer.o: include/unique.h include/schedplan.h include/composer.h composer.cc
+${BUILD}/composer.o: ${BUILD}/schedplan.o include/composer.h composer.cc
 	mkdir -p ${BUILD}
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/composer.o -c composer.cc
 
-${BUILD}/libtetris.so: ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o
-	$(CXX) $(CPPFLAGS) -shared -o ${BUILD}/libtetris.so ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${LIBS}
+${BUILD}/generalizer.o: ${BUILD}/composer.o include/generalizer.h generalizer.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/generalizer.o -c generalizer.cc
+
+${BUILD}/libtetris.so: ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o
+	$(CXX) $(CPPFLAGS) -shared -o ${BUILD}/libtetris.so ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o ${LIBS}
 
 ${BUILD}/test: examples/test.cc ${BUILD}/libtetris.so
 	$(CXX) $(CPPFLAGS) examples/test.cc -o ${BUILD}/test -L./build/ -Wl,-rpath=./build -ltetris
