@@ -131,15 +131,15 @@ std::vector<SchedPlan> premise_interleave(int ndevs, int nmicros) {
                     all_device[devid] = devid;
                 }
                 micro.addBlock(fblocks[step], all_device, step);
-                bblocks[step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
-                micro.addBlock(bblocks[step], all_device, (ndevs+2)*2-1-step);
+                bblocks[ndevs+1-step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
+                micro.addBlock(bblocks[ndevs+1-step], all_device, (ndevs+2)*2-1-step);
             }
             else {
-                int dev = (step < ndevs + 1) ? step - 1 : step - 2;
+                int dev = (step < ndevs / 2 + 1) ? step - 1 : step - 2;
                 fblocks[step] = new Block(mid, BlockType::Forward, 1.0, 1.0);
                 micro.addBlock(fblocks[step], dev, step);
-                bblocks[step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
-                micro.addBlock(bblocks[step], dev, (ndevs+2)*2-1-step);
+                bblocks[ndevs+1-step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
+                micro.addBlock(bblocks[ndevs+1-step], dev, (ndevs+2)*2-1-step);
             }
         }
         std::vector<Block*> blocks(fblocks);
