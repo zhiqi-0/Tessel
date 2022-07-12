@@ -2,6 +2,8 @@
 #include <iostream>
 #include <utility>
 #include <vector>
+#include <algorithm>
+#include <limits>
 
 #include <composer.h>
 
@@ -131,7 +133,8 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
 
     if (!silence) {
         std::cout << "search done on " << total_status << " cases. "
-                  << "find " << schedules.size() << " tight step-optimal plans" << std::endl;
+                  << "find " << schedules.size() << " tight step-optimal plans "
+                  << "(step = " << opt_step << ")" << std::endl;
     }
     return schedules;
 }
@@ -343,22 +346,26 @@ Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step
                     break;
                 }
                 // post-memory. TODO: prove this to be the real lower bound
-                float min_remain_peak_mem = memory[dev];
+                std::vector< std::pair<std::size_t, float> > remain_peak_mem;
                 for (size_t rmid = 0; rmid < micros.size(); ++rmid) {
-                    if (rmid == mid) {
-                        min_remain_peak_mem = std::min(
-                            min_remain_peak_mem,
-                            micros[rmid].peakMemory(dev, step+1)
-                        );
-                    }
-                    else {
-                        min_remain_peak_mem = std::min(
-                            min_remain_peak_mem,
-                            micros[rmid].peakMemory(dev, step)
-                        );
-                    }
+                    int start_step = (rmid == mid) ? step + 1 : step;
+                    remain_peak_mem.emplace_back(
+                        rmid, micros[rmid].peakMemory(dev, start_step)
+                    );
                 }
-                min_peak_mem = devmem[dev] + blk->memory + min_remain_peak_mem;
+                std::sort(
+                    remain_peak_mem.begin(), remain_peak_mem.end(),
+                    [&](const std::pair<int,float>& a, const std::pair<int,float>& b) { return a.second < b.second; }
+                );
+                float curr_mem = 0.0;
+                float peak_mem = -std::numeric_limits<float>::max();
+                for (auto& mid_pmem : remain_peak_mem) {
+                    std::size_t sort_mid = mid_pmem.first;
+                    peak_mem = std::max(peak_mem, curr_mem + mid_pmem.second);
+                    int start_step = (sort_mid == mid) ? step + 1 : step;
+                    curr_mem += micros[sort_mid].currMemory(dev, start_step);
+                }
+                min_peak_mem = devmem[dev] + blk->memory + peak_mem;
                 if (min_peak_mem > memory[dev]) {
                     need_shift = true;
                     break;

@@ -187,6 +187,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
     else {
         std::cout << "one solution:\n" << opt_plans[0] << std::endl;
     }
+    // for (int idx = 0; idx < opt_plans.size(); ++idx) { std::cout << "plan#" << idx << ":\n" << opt_plans[idx] << std::endl;}
 }
 
 
