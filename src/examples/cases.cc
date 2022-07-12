@@ -193,9 +193,9 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
 
     GeneralSchedPlan best_plan;
     float min_bubble_rate = 1.0;
-    for (auto& opt_plan : opt_plans) {
+    for (size_t idx = 0; idx < opt_plans.size(); ++idx) {
         GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
-            opt_plan, memory, 1
+            opt_plans[idx], memory, 1
         );
         float bubble_rate = gsched.steady_bubble_rate();
         if (bubble_rate < min_bubble_rate) {
@@ -209,7 +209,16 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         else {
             gsched.destroyCreatedBlocks();
         }
+        if ((idx+1) % 10 == 0) {
+            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << "plans\n";
+        }
+        if (min_bubble_rate == 0) {
+            std::cout << "early stop as found 0-buuble plan\n";
+            break;
+        }
     }
+    std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
+              << "bubble rate: " << min_bubble_rate << std::endl;
 }
 
 

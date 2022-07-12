@@ -31,7 +31,7 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(const SchedPlan& sched, const st
         std::runtime_error("fail to find a steady plan\n");
     }
     SchedPlan steady = steadies[0];
-    
+
     GeneralSchedPlan gplan(lhead, steady, rtail);
     for (auto blk : rsched.allBlocks()) {
         gplan.addCreatedBlocks(blk);

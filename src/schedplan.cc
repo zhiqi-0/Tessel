@@ -183,15 +183,17 @@ int SchedPlan::getStep(Block* blk) const {
 
 std::vector<Block*> SchedPlan::stepBlocks(int step) const {
     /**
-     * @brief Get blocks on a step
+     * @brief Get blocks on a step with device order.
      * 
      */
+    std::set<Block*> added_blks;
     std::vector<Block*> blks;
     if (step >= this->nSteps()) return blks;
     for (int devid = 0; devid < _ndevs; ++devid) {
         Block* blk = _plans[devid][step];
-        if (blk != nullptr) {
+        if (blk != nullptr and added_blks.find(blk) == added_blks.end()) {
             blks.push_back(blk);
+            added_blks.insert(blk);
         }
     }
     return blks;
