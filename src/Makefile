@@ -28,7 +28,7 @@ ${BUILD}/test: examples/test.cc ${BUILD}/libtetris.so
 	$(CXX) $(CPPFLAGS) examples/test.cc -o ${BUILD}/test -L./build/ -Wl,-rpath=./build -ltetris
 
 
-${BUILD}/cases: examples/cases.cc ${BUILD}/libtetris.so
+${BUILD}/cases: include/parser.h examples/cases.cc ${BUILD}/libtetris.so
 	$(CXX) $(CPPFLAGS) examples/cases.cc -o ${BUILD}/cases -L./build/ -Wl,-rpath=./build -ltetris
 
 

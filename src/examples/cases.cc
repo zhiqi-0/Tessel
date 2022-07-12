@@ -15,8 +15,13 @@
 #include <string>
 #include <schedplan.h>
 #include <composer.h>
+#include <parser.h>
+
+#include <functional>
 
 #include <chrono>
+
+typedef Plans (PremiseFunc)(int, int);
 
 
 class CpuTimer {
@@ -36,6 +41,7 @@ class CpuTimer {
 
 
 std::vector<SchedPlan> premise_vshape(int ndevs, int nmicros) {
+    std::cout << "here in premise" << std::endl;
     std::vector<SchedPlan> micros;
     for (int mid = 0; mid < nmicros; ++mid) {
         SchedPlan micro(ndevs, ndevs);
@@ -151,13 +157,16 @@ std::vector<SchedPlan> premise_interleave(int ndevs, int nmicros) {
 }
 
 
-void search(int ndevs, int nmicros, float dev_memory) {
+void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float dev_memory) {
 
     CpuTimer timer;
 
     // std::vector<SchedPlan> micros = premise_vshape(ndevs, nmicros);
     // std::vector<SchedPlan> micros = premise_chimera(ndevs, nmicros);
-    std::vector<SchedPlan> micros = premise_interleave(ndevs, nmicros);
+    // std::vector<SchedPlan> micros = premise_interleave(ndevs, nmicros);
+    std::cout << "here" << std::endl;
+    std::vector<SchedPlan> micros = premise(ndevs, nmicros);
+
     for (int mid = 0; mid < nmicros; ++mid) {
         std::cout << "Premise Micro ID# " << mid << ":\n";
         std::cout << micros[mid] << std::endl;
@@ -181,8 +190,39 @@ void search(int ndevs, int nmicros, float dev_memory) {
 }
 
 
-int main() {
+int main(int argc, const char* argv[]) {
 
-    search(4, 4, 10.0);
+    std::unordered_map<std::string, std::function<PremiseFunc> > premises;
+    premises.emplace(
+        std::string("vshape"), std::function<PremiseFunc>(premise_vshape)
+    );
+    premises.emplace(
+        std::string("chimera"), std::function<PremiseFunc>(premise_chimera)
+    );
+    premises.emplace(
+        std::string("interleave"), std::function<PremiseFunc>(premise_interleave)
+    );
+
+    CmdParser parser;
+    parser.add<std::string>("--premise", "premise of micro-batch.");
+    parser.add<int>("--ndevs", "number of devices.");
+    parser.add<int>("--nmicros", "number of micro-batches.");
+    parser.add<float>("--memory", "memory consumpition of each device.");
+    parser.parse(argc, argv);
+    std::cout << parser << std::endl;
+
+    std::string premise_str = parser.get<std::string>("premise");
+    std::cout << "premise str: " << premise_str << std::endl;
+    if (premises.find(premise_str) == premises.end()) {
+        throw std::runtime_error("not find premise\n");
+    }
+    std::function<PremiseFunc> premise = premises[premise_str];
+    search(
+        premise,
+        parser.get<int>("ndevs"),
+        parser.get<int>("nmicros"),
+        parser.get<float>("memory")
+    );
+
     return 0;
 }
