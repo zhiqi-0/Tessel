@@ -110,16 +110,16 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                 candidates_and_schedules.first.begin(),
                 candidates_and_schedules.first.end()
             );
-            schedules.insert(
-                schedules.end(),
-                candidates_and_schedules.second.begin(),
-                candidates_and_schedules.second.end()
-            );
-        }
-        for (auto& sched : schedules) {
-            if (sched.nSteps() < opt_step) {
-                if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
-                opt_step = sched.nSteps();
+
+            for (auto& sched : candidates_and_schedules.second) {
+                if (sched.nSteps() < opt_step) {
+                    if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
+                    opt_step = sched.nSteps();
+                    schedules.clear();
+                }
+                if (sched.nSteps() == opt_step) {
+                    schedules.push_back(sched);
+                }
             }
         }
 
