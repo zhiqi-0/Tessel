@@ -289,7 +289,7 @@ SchedPlan SchedPlan::concat(std::vector<SchedPlan>& plans) {
 
 bool SchedPlan::stackable(std::vector<SchedPlan>& plans, const std::vector<float>& memory) {
     /**
-     * @brief CHeck plans satisfy the stackable conditon, i.e., no conflicts and 
+     * @brief Check plans satisfy the stackable conditon, i.e., no conflicts and 
      * within memory constraints.
      * 
      */
@@ -299,15 +299,26 @@ bool SchedPlan::stackable(std::vector<SchedPlan>& plans, const std::vector<float
     }
     int ndevs = plans[0].nDevs();
     for (int devid = 0; devid < ndevs; ++devid) {
+        float peak_mem = -std::numeric_limits<float>::max();
+        std::vector<float> curr_mem(nsteps, 0);
         for (int step = 0; step < nsteps; ++step) {
             bool have_block = false;
             for (auto& plan : plans) {
-                if (step < plan.nSteps() and plan.getBlock(devid, step) != nullptr) {
+                Block* blk = plan.getBlock(devid, step);
+                if (blk != nullptr) {
+                    curr_mem[step] += blk->memory;
                     if (have_block) {
                         return false;
                     }
                     have_block = true;
                 }
+            }
+            peak_mem = std::max(peak_mem, curr_mem[step]);
+            if (peak_mem > memory[devid]) {
+                return false;
+            }
+            if (step < nsteps - 1) {
+                curr_mem[step+1] = curr_mem[step];
             }
         }
     }

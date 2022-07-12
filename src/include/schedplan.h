@@ -11,7 +11,7 @@
 #include <unique.h>
 
 
-enum class BlockType { Forward, Bakward };
+enum class BlockType { Forward, Backward };
 
 
 class Block {

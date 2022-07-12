@@ -32,7 +32,7 @@ SchedPlan test_plan_creation_vshape(int mid = 0) {
         micro.addBlock(fblocks[devid], devid, devid);
     }
     for (int devid = 0; devid < ndevs; ++devid) {
-        bblocks[devid] = new Block(mid ,BlockType::Bakward, 1.0, 1.0);
+        bblocks[devid] = new Block(mid ,BlockType::Backward, 1.0, 1.0);
         std::vector<int> devices = {devid};
         micro.addBlock(bblocks[devid], ndevs-1-devid, ndevs+devid);
     }
@@ -74,11 +74,11 @@ SchedPlan test_plan_creation_mshape() {
     }
 
     for (int devid = 0; devid < ndevs; ++devid) {
-        bblocks[devid] = new Block(0,BlockType::Bakward, 1.0, 1.0);
+        bblocks[devid] = new Block(0,BlockType::Backward, 1.0, 1.0);
         std::vector<int> devices = {devid};
         micro.addBlock(bblocks[devid], ndevs-1-devid, ndevs+1+devid);
     }
-    bblocks[ndevs] = new Block(0,BlockType::Bakward, 1.0, 1.0);
+    bblocks[ndevs] = new Block(0,BlockType::Backward, 1.0, 1.0);
     micro.addBlock(bblocks[ndevs], devids, ndevs+1+ndevs);
 
     // test add Dependency
