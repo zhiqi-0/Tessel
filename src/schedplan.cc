@@ -440,6 +440,7 @@ GeneralSchedPlan::GeneralSchedPlan(const SchedPlan& lhead, const SchedPlan& stea
   : SchedPlan(steady.nDevs(), lhead.nSteps() + steady.nSteps() + rtail.nSteps()) {
     _lbound = lhead.nSteps();
     _rbound = _lbound + steady.nSteps();
+    _empty = false;
     int ofst = 0;
     for (auto blk : lhead.allBlocks()) {
         this->addBlock(blk, lhead.getDevice(blk), lhead.getStep(blk) + ofst);
@@ -459,6 +460,7 @@ GeneralSchedPlan::GeneralSchedPlan(const GeneralSchedPlan& plan)
   : SchedPlan(plan) {
     _lbound = plan.getLBound();
     _rbound = plan.getRBound();
+    _empty = plan.isEmpty();
     _created = plan.getCreatedBlocks();
 }
 

@@ -103,7 +103,8 @@ class Composer {
  public:
 
     static Plans stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
-                             bool prune_symm = true, bool silence = false, int nworkers = 1);
+                             bool prune_symm = true, bool silence = false, int opt_step_upbound = -1,
+                             int nworkers = 1);
 
     static std::pair<std::vector<Plans>, std::vector<SchedPlan>>
     resolveStep(const Plans& micros, const std::vector<float>& memory,

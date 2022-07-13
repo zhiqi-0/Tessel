@@ -189,7 +189,7 @@ class GeneralSchedPlan: public SchedPlan {
 
  public:
 
-    GeneralSchedPlan(): SchedPlan() {}
+    GeneralSchedPlan(): SchedPlan(), _empty(true) {}
 
     GeneralSchedPlan(const SchedPlan& lhead, const SchedPlan& steady, const SchedPlan& rtail);
 
@@ -198,6 +198,8 @@ class GeneralSchedPlan: public SchedPlan {
     inline const int getLBound() const { return _lbound; }
     inline const int getRBound() const { return _rbound; }
     inline std::set<Block*> getCreatedBlocks() const {return _created;}
+    inline bool isEmpty() const { return _empty; }
+
     void addCreatedBlocks(Block* blk) { _created.insert(blk); }
     void destroyCreatedBlocks();
 
@@ -211,8 +213,11 @@ class GeneralSchedPlan: public SchedPlan {
     }
 
 
+
+
  private:
     int _lbound;
     int _rbound;
+    bool _empty;
     std::set<Block*> _created;
 };

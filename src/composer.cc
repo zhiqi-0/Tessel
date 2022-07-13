@@ -75,7 +75,7 @@ bool Block2Hash::samePlan(const SchedPlan& sched1, const SchedPlan sched2) {
 // ******************* Composer *******************
 
 Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
-                            bool prune_symm, bool silence, int nworkers) {
+                            bool prune_symm, bool silence, int opt_step_upbound, int nworkers) {
 
     
     // construct block mapping to micro index
@@ -95,6 +95,7 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
     for (auto& micro : micros) {
         opt_step += micro.nSteps();
     }
+    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
 
     // ============== BFS search ==============
     

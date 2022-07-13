@@ -175,7 +175,9 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
 
     // step optimal search
     timer.start();
-    std::vector<SchedPlan> opt_plans = Composer::stepOptimal(micros, memory, true, false, nworkers);
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimal(
+        micros, memory, true, false, -1, nworkers
+    );
     timer.stop();
     std::cout << "step-optimal search time: "
               << float(timer.elapsed()) / 1000 
@@ -189,15 +191,30 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
     }
     // for (int idx = 0; idx < opt_plans.size(); ++idx) { std::cout << "plan#" << idx << ":\n" << opt_plans[idx] << std::endl;}
 
+    timer.start();
+
     GeneralSchedPlan best_plan;
     float min_bubble_rate = 1.0;
+    float min_steady_step = opt_plans[0].nSteps() * 2;
     for (size_t idx = 0; idx < opt_plans.size(); ++idx) {
+        // prune technique to early stop for other plan
         GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
-            opt_plans[idx], memory, nworkers
+            opt_plans[idx], memory, min_steady_step - 1, nworkers
         );
+
+        if ((idx+1) % 10 == 0) {
+            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << "plans\n";
+        }
+
+        if (gsched.isEmpty()) {
+            gsched.destroyCreatedBlocks();
+            continue;
+        }
+
         float bubble_rate = gsched.steady_bubble_rate();
         if (bubble_rate < min_bubble_rate) {
             min_bubble_rate = bubble_rate;
+            min_steady_step = gsched.getRBound() - gsched.getLBound();
             std::cout << "find generalized plan with bubble rate: "
                       << min_bubble_rate << std::endl;
             std::cout << gsched << std::endl;
@@ -207,16 +224,16 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         else {
             gsched.destroyCreatedBlocks();
         }
-        if ((idx+1) % 10 == 0) {
-            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << "plans\n";
-        }
         if (min_bubble_rate == 0) {
             std::cout << "early stop as found 0-buuble plan\n";
             break;
         }
     }
+
+    timer.stop();
     std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
-              << "bubble rate: " << min_bubble_rate << std::endl;
+              << "bubble rate: " << min_bubble_rate << std::endl
+              << "Generalization time: " << float(timer.elapsed()) / 1000 << " seconds\n"; 
 }
 
 

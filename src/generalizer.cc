@@ -3,7 +3,12 @@
 #include <schedplan.h>
 
 
-GeneralSchedPlan Generalizer::tailHeadHeuristic(const SchedPlan& sched, const std::vector<float>& memory, const int nworkers) {
+GeneralSchedPlan Generalizer::tailHeadHeuristic(
+  const SchedPlan& sched,
+  const std::vector<float>& memory,
+  const int steady_opt_step_upbound,
+  const int nworkers) {
+
     std::set<int> mids;
     for (auto blk : sched.allBlocks()) {
         mids.insert(blk->mid);
@@ -26,13 +31,17 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(const SchedPlan& sched, const st
         float curr_mem = lhead.currMemory(devid);
         steady_memory[devid] = memory[devid] - curr_mem;
     }
-    Plans steadies = Composer::stepOptimal(tail_heads, steady_memory, true, true, nworkers);
-    if (steadies.size() == 0) {
-        std::runtime_error("fail to find a steady plan\n");
-    }
-    SchedPlan steady = steadies[0];
+    Plans steadies = Composer::stepOptimal(
+        tail_heads, steady_memory, true, true,
+        steady_opt_step_upbound, nworkers
+    );
 
-    GeneralSchedPlan gplan(lhead, steady, rtail);
+    GeneralSchedPlan gplan;
+    if (steadies.size() > 0) {
+        SchedPlan steady = steadies[0];
+        gplan = GeneralSchedPlan(lhead, steady, rtail);
+    }
+
     for (auto blk : rsched.allBlocks()) {
         gplan.addCreatedBlocks(blk);
     }

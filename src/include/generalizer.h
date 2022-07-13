@@ -13,7 +13,8 @@ class Generalizer {
     static GeneralSchedPlan tailHeadHeuristic(
         const SchedPlan& sched,
         const std::vector<float>& memory,
-        const int nworkers
+        const int steady_opt_step_upbound = -1,
+        const int nworkers = 1
     );
 
     static SchedPlan& loosen_all(
