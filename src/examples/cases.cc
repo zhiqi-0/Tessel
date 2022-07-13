@@ -43,7 +43,6 @@ class CpuTimer {
 
 
 std::vector<SchedPlan> premise_vshape(int ndevs, int nmicros) {
-    std::cout << "here in premise" << std::endl;
     std::vector<SchedPlan> micros;
     for (int mid = 0; mid < nmicros; ++mid) {
         SchedPlan micro(ndevs, ndevs);
@@ -159,14 +158,13 @@ std::vector<SchedPlan> premise_interleave(int ndevs, int nmicros) {
 }
 
 
-void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float dev_memory) {
+void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float dev_memory, int nworkers) {
 
     CpuTimer timer;
 
     // std::vector<SchedPlan> micros = premise_vshape(ndevs, nmicros);
     // std::vector<SchedPlan> micros = premise_chimera(ndevs, nmicros);
     // std::vector<SchedPlan> micros = premise_interleave(ndevs, nmicros);
-    std::cout << "here" << std::endl;
     std::vector<SchedPlan> micros = premise(ndevs, nmicros);
 
     for (int mid = 0; mid < nmicros; ++mid) {
@@ -177,7 +175,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
 
     // step optimal search
     timer.start();
-    std::vector<SchedPlan> opt_plans = Composer::stepOptimal(micros, memory);
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimal(micros, memory, true, false, nworkers);
     timer.stop();
     std::cout << "step-optimal search time: "
               << float(timer.elapsed()) / 1000 
@@ -195,7 +193,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
     float min_bubble_rate = 1.0;
     for (size_t idx = 0; idx < opt_plans.size(); ++idx) {
         GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
-            opt_plans[idx], memory, 1
+            opt_plans[idx], memory, nworkers
         );
         float bubble_rate = gsched.steady_bubble_rate();
         if (bubble_rate < min_bubble_rate) {
@@ -240,6 +238,8 @@ int main(int argc, const char* argv[]) {
     parser.add<int>("--ndevs", "number of devices.");
     parser.add<int>("--nmicros", "number of micro-batches.");
     parser.add<float>("--memory", "memory consumpition of each device.");
+    parser.add<int>("--nworkers", "number of worker for omp threads");
+    parser.setDefault<int>("--nworkers", 1);
     parser.parse(argc, argv);
     std::cout << parser << std::endl;
 
@@ -253,7 +253,8 @@ int main(int argc, const char* argv[]) {
         premise,
         parser.get<int>("ndevs"),
         parser.get<int>("nmicros"),
-        parser.get<float>("memory")
+        parser.get<float>("memory"),
+        parser.get<int>("nworkers")
     );
 
     return 0;
