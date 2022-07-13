@@ -26,7 +26,7 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(const SchedPlan& sched, const st
         float curr_mem = lhead.currMemory(devid);
         steady_memory[devid] = memory[devid] - curr_mem;
     }
-    Plans steadies = Composer::stepOptimal(tail_heads, steady_memory, true, true);
+    Plans steadies = Composer::stepOptimal(tail_heads, steady_memory, true, true, nworkers);
     if (steadies.size() == 0) {
         std::runtime_error("fail to find a steady plan\n");
     }

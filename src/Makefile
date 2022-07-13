@@ -1,9 +1,9 @@
 
 CXX = g++
 
-CXXFLAGS = -O2 -std=c++11 -fPIC -Wall
+CXXFLAGS = -O2 -std=c++11 -fPIC -Wall -fopenmp
 CPPFLAGS = -I./include/
-LIBS = -lstdc++
+LIBS = -lstdc++ -lpthread
 
 BUILD = build
 
@@ -25,7 +25,7 @@ ${BUILD}/generalizer.o: ${BUILD}/composer.o include/generalizer.h generalizer.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/generalizer.o -c generalizer.cc
 
 ${BUILD}/libtetris.so: ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o
-	$(CXX) $(CPPFLAGS) -shared -o ${BUILD}/libtetris.so ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o ${LIBS}
+	$(CXX) ${CXXFLAGS} $(CPPFLAGS) -shared -o ${BUILD}/libtetris.so ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o ${LIBS}
 
 ${BUILD}/test: examples/test.cc ${BUILD}/libtetris.so
 	$(CXX) $(CPPFLAGS) examples/test.cc -o ${BUILD}/test -L./build/ -Wl,-rpath=./build -ltetris

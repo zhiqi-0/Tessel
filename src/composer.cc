@@ -4,6 +4,9 @@
 #include <vector>
 #include <algorithm>
 #include <limits>
+#include <cstdio>
+
+#include <omp.h>
 
 #include <composer.h>
 
@@ -103,24 +106,68 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
     // BFS steps
     while (step < opt_step) {
         if (!silence) std::cout << "solving step " << step << ", candidates: " << curr.size() << std::endl;
-
         const int ncandidates = curr.size();
-        for (int idx = 0; idx < ncandidates; ++idx) {
-            auto candidates_and_schedules = Composer::resolveStep(curr[idx], memory, step, opt_step, blk2hash, blk2idx);
-            next.insert(
-                next.end(),
-                candidates_and_schedules.first.begin(),
-                candidates_and_schedules.first.end()
-            );
 
-            for (auto& sched : candidates_and_schedules.second) {
-                if (sched.nSteps() < opt_step) {
-                    if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
-                    opt_step = sched.nSteps();
+        // ==================== single thread version =================
+        // for (int idx = 0; idx < ncandidates; ++idx) {
+        //     auto candidates_and_schedules = Composer::resolveStep(curr[idx], memory, step, opt_step, blk2hash, blk2idx);
+        //     next.insert(
+        //         next.end(),
+        //         candidates_and_schedules.first.begin(),
+        //         candidates_and_schedules.first.end()
+        //     );
+        // 
+        //     for (auto& sched : candidates_and_schedules.second) {
+        //         if (sched.nSteps() < opt_step) {
+        //             if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
+        //             opt_step = sched.nSteps();
+        //             schedules.clear();
+        //         }
+        //         if (sched.nSteps() == opt_step) {
+        //             schedules.push_back(sched);
+        //         }
+        //     }
+        // }
+    
+        // ==================== openmp parallelized version =================
+        #pragma omp parallel num_threads(nworkers)
+        {
+            int tid = omp_get_thread_num();
+            int start = curr.size() / nworkers * tid;
+            int stop = (tid == nworkers - 1) ? ncandidates : start + ncandidates / nworkers;
+            int local_opt_step = opt_step;
+            std::vector<Plans> local_next;
+            std::vector<SchedPlan> local_schedules;
+            for (int idx = start; idx < stop; idx++) {
+                auto candidates_and_schedules = Composer::resolveStep(
+                    curr[idx], memory, step, local_opt_step, blk2hash, blk2idx);
+                local_next.insert(
+                    local_next.end(),
+                    candidates_and_schedules.first.begin(),
+                    candidates_and_schedules.first.end()
+                );
+                for (auto& sched : candidates_and_schedules.second) {
+                    if (sched.nSteps() < local_opt_step) {
+                        local_opt_step = sched.nSteps();
+                        local_schedules.clear();
+                    }
+                    if (sched.nSteps() == local_opt_step) {
+                        local_schedules.push_back(sched);
+                    }
+                }
+            }
+            #pragma omp critical
+            {
+                //int _x; std::cin >> _x;
+                next.insert(next.end(), local_next.begin(), local_next.end());
+                if (local_opt_step < opt_step) {
+                    if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
+                    opt_step = local_opt_step;
                     schedules.clear();
                 }
-                if (sched.nSteps() == opt_step) {
-                    schedules.push_back(sched);
+                if (local_opt_step == opt_step) {
+                    schedules.insert(
+                        schedules.end(), local_schedules.begin(), local_schedules.end());
                 }
             }
         }
