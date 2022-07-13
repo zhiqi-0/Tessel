@@ -99,6 +99,14 @@ class CmdParser {
         _field.emplace(name, new Option(name, action));
     }
 
+    template <typename T>
+    void setDefault(const std::string& name, T val) {
+        if (!this->exist(name)) {
+            this->add<T>(name);
+        }
+        _field[this->name2field(name)]->setDefault(std::to_string(val));
+    }
+
     inline std::string name2field(std::string name) {
         if (name.substr(0, 2) == "--") {
             return name;
