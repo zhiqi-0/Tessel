@@ -131,6 +131,8 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
         // }
     
         // ==================== openmp parallelized version =================
+        std::vector<std::size_t> num_next(nworkers, 0);
+        std::vector<int> local_opts(nworkers, opt_step);
         #pragma omp parallel num_threads(nworkers)
         {
             int tid = omp_get_thread_num();
@@ -147,6 +149,18 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                     candidates_and_schedules.first.begin(),
                     candidates_and_schedules.first.end()
                 );
+
+                // very important pruning techniques
+                for (auto& ms : candidates_and_schedules.first) {
+                    int opt_step_bound = step + 1;
+                    for (auto& micro : ms) {
+                        if (micro.nSteps() > step) {
+                            opt_step_bound += micro.nSteps() - step - 1;
+                        }
+                    }
+                    local_opt_step = std::min(local_opt_step, opt_step_bound);
+                }
+
                 for (auto& sched : candidates_and_schedules.second) {
                     if (sched.nSteps() < local_opt_step) {
                         local_opt_step = sched.nSteps();
@@ -157,20 +171,59 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                     }
                 }
             }
-            #pragma omp critical
+            num_next[tid] = local_next.size();
+            local_opts[tid] = local_opt_step;
+
+            #pragma omp barrier
+
+            #pragma omp single 
             {
-                //int _x; std::cin >> _x;
-                next.insert(next.end(), local_next.begin(), local_next.end());
-                if (local_opt_step < opt_step) {
-                    if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
-                    opt_step = local_opt_step;
-                    schedules.clear();
+                std::size_t total_next = 0;
+                for (int num : num_next) {
+                    total_next += num;
                 }
-                if (local_opt_step == opt_step) {
-                    schedules.insert(
-                        schedules.end(), local_schedules.begin(), local_schedules.end());
+                next.resize(total_next);
+                for (int local_opt : local_opts) {
+                    if (local_opt < opt_step) {
+                        if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
+                        opt_step = local_opt;
+                        schedules.clear();
+                    }
                 }
             }
+
+            #pragma omp barrier
+
+            // insert next
+            std::size_t local_start = 0;
+            for (int idx = 0; idx < tid; ++idx) {
+                local_start += num_next[idx];
+            }
+            std::copy(local_next.begin(), local_next.end(), next.begin() + local_start);
+
+            #pragma omp critical
+            {
+                if (local_opt_step == opt_step) {
+                    schedules.insert(
+                        schedules.end(), local_schedules.begin(), local_schedules.end()
+                    );
+                }
+            }
+
+            // #pragma omp critical
+            // {
+            //     //int _x; std::cin >> _x;
+            //     next.insert(next.end(), local_next.begin(), local_next.end());
+            //     if (local_opt_step < opt_step) {
+            //         if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
+            //         opt_step = local_opt_step;
+            //         schedules.clear();
+            //     }
+            //     if (local_opt_step == opt_step) {
+            //         schedules.insert(
+            //             schedules.end(), local_schedules.begin(), local_schedules.end());
+            //     }
+            // }
         }
 
         total_status += next.size();
@@ -212,11 +265,10 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
     );
 
     // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
+    // for (auto shifts : all_shifts) {std::cout << "shift: "; for (auto blk : shifts) printf("%s(%d) ", blk->toStr().c_str(), blk->mid); std::cout << std::endl; }
+    // { int _x; std::cin >> _x; }
+
     for (auto& shifts : all_shifts) {
-        // std::cout << "shift: ";
-        // for (auto blk : shifts) std::cout << *blk << " ";
-        // std::cout << std::endl;
-        // int _x; std::cin >> _x;
 
         // copy for inplacement update
         Plans cmicros(micros);
@@ -246,6 +298,7 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
             }
         }
     }
+    // std::cout << "=====<" << std::endl;
     return std::make_pair(next, schedules);
 }
 
@@ -256,92 +309,102 @@ Composer::getShiftSpace(const int ndevice,
                         const Conflict& mem_conflict,
                         const Block2Hash& blk2hash) {
 
-    // set up candidates
-    std::unordered_map<int, std::vector<Block*>> keep_candidates(ndevice);
+    // set up candidates by pruning out same blocks
+    std::unordered_map<int, Block*> keep_uids;
     for (auto cblock : step_conflict.allBlocks()) {
-        if (!mem_conflict.haveBlock(cblock)) {
-            for (auto devid : step_conflict.getDevice(cblock)) {
-                keep_candidates[devid].push_back(cblock);
+        if (mem_conflict.haveBlock(cblock)) continue;
+        int uid = blk2hash.getUid(cblock);
+        if (keep_uids.find(uid) != keep_uids.end()) {
+            if (keep_uids[uid]->mid > cblock->mid) {
+                keep_uids[uid] = cblock;
             }
         }
+        else {
+            keep_uids.emplace(uid, cblock);
+        }
     }
-    // for (auto& it : keep_candidates) {
-    //     std::cout << "keep candidates: " << it.first << " : blocks: ";
-    //     for (auto blk : it.second) {
-    //         std::cout << " " << *blk;
-    //     }
-    //     std::cout << std::endl;
-    // }
+    std::set<Block*> keep_candidates;
+    for (auto& it : keep_uids) {
+        keep_candidates.insert(it.second);
+    }
+    // printf("candidates: "); for (Block* blk : keep_candidates) { printf("%s(%d) ", blk->toStr().c_str(), blk->mid); } std::cout << std::endl;
 
-    std::vector< std::vector<Block*> > curr;  // current kept block
-    std::vector< std::vector<Block*> > next;  // next kept block
+    std::vector<std::set<Block*>> all_keeps;
+    using Item = std::pair<std::set<Block*>, std::vector<bool>>;
+    std::vector<Item> curr;
+    std::vector<Item> next;
+    curr.emplace_back(std::set<Block*>(), std::vector<bool>(ndevice, false));
 
-    curr.push_back(std::vector<Block*>(ndevice, nullptr));
-
-    for (int devid = 0; devid < ndevice; ++devid) {
-        for (auto& keep_blks : curr) {
-            if (keep_blks[devid] == nullptr) {
-                std::vector<Block*> candidates;
-                std::unordered_map<int, Block*> uid_blks;
-                for (auto blk : keep_candidates[devid]) {
-                    int uid = blk2hash.getUid(blk);
-                    if (uid_blks.find(uid) != uid_blks.end()) {
-                        if (blk->mid < uid_blks[uid]->mid) {
-                            uid_blks[uid] = blk;
+    while (!curr.empty()) {
+        // std::cout << "next =====" << std::endl;
+        for (auto& item : curr) {
+            bool no_more_add = true;
+            for (Block* blk : keep_candidates) {
+                // std::cout << "here1 " << *blk << std::endl;
+                if (item.first.find(blk) == item.first.end()) {
+                    bool can_insert = true;
+                    for (int devid : step_conflict.getDevice(blk)) {
+                        if (item.second[devid]) {
+                            can_insert = false;
+                            break;
                         }
                     }
-                    else {
-                        uid_blks.emplace(uid, blk);
-                    }
-                }
-                for (auto& it : uid_blks) {
-                    candidates.push_back(it.second);
-                }
-                if (candidates.size() == 0) {
-                    next.push_back(keep_blks);
-                }
-                else {
-                    for (auto keep_blk : candidates) {
-                        bool empty = true;
-                        auto kdevs = step_conflict.getDevice(keep_blk);
-                        for (int kdev : kdevs) {
-                            if (keep_blks[kdev] != nullptr) {
-                                empty = false;
-                                break;
-                            }
+                    //std::cout << "can insert: " << can_insert << std::endl;
+                    if (can_insert) {
+                        std::set<Block*> blks(item.first);
+                        std::vector<bool> devs(item.second);
+                        blks.insert(blk);
+                        for (int devid : step_conflict.getDevice(blk)) {
+                            devs[devid] = true;
                         }
-                        if (empty) {
-                            std::vector<Block*> next_keep_blks(keep_blks);
-                            for (int kdev : kdevs) {
-                                next_keep_blks[kdev] = keep_blk;
-                            }
-                            next.push_back(next_keep_blks);
-                        }
+                        next.emplace_back(blks, devs);
+                        no_more_add = false;
                     }
                 }
             }
-            else {
-                next.push_back(keep_blks);
+            if (no_more_add) {
+                // check redundant
+                // printf("adding all_keeps: "); for (auto blk : item.first) { printf("%s ", blk->toStr().c_str()); } printf("\n");
+                bool exist = false;
+                for (auto& keep : all_keeps) {
+                    bool same = true;
+                    for (auto& blk : item.first) {
+                        if (keep.find(blk) == keep.end()) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) {
+                            exist = true;
+                            break;
+                        }
+                }
+                if (!exist) {
+                    // printf("....success!\n");
+                    all_keeps.push_back(item.first);
+                }
             }
         }
         curr.clear();
         std::swap(curr, next);
     }
 
+
+    // for (auto& keep : all_keeps) { printf("keeps: "); for (auto& blk : keep) {std::cout << *blk << " ";} std::cout << std::endl; } 
+
     std::vector<std::set<Block*> > all_shifts;
-    for (auto& keep_blks : curr) {
+    std::set<Block*> all_blks;
+    auto step_cblks = step_conflict.allBlocks();
+    auto mem_cblks = step_conflict.allBlocks();
+    all_blks.insert(step_cblks.begin(), step_cblks.end());
+    all_blks.insert(mem_cblks.begin(), mem_cblks.end());
+    for (auto& keep : all_keeps) {
         std::set<Block*> shifts;
-        for (int devid = 0; devid < ndevice; ++devid) {
-            Block* kblock = keep_blks[devid];
-            for (auto cblock : step_conflict.getDeviceBlocks(devid)) {
-                if (cblock != nullptr and cblock != kblock) {
-                    shifts.insert(cblock);
-                }
-            }
-            for (auto cblock : mem_conflict.getDeviceBlocks(devid)) {
-                shifts.insert(cblock);
-            }
-        }
+        std::set_difference(
+            all_blks.begin(), all_blks.end(),
+            keep.begin(), keep.end(),
+            std::inserter(shifts, shifts.begin())
+        );
         all_shifts.push_back(shifts);
     }
     return all_shifts;

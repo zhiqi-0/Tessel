@@ -94,7 +94,7 @@ std::vector<SchedPlan> premise_chimera(int ndevs, int nmicros) {
         Block::addDependencies(blocks);
         micros.push_back(micro);
     }
-    for (int mid = 0; mid < nmicros / 2; ++mid) {
+    for (int mid = nmicros / 2; mid < nmicros; ++mid) {
         SchedPlan micro(ndevs, ndevs);
         std::vector<Block*> fblocks(ndevs, nullptr);
         std::vector<Block*> bblocks(ndevs, nullptr);
@@ -158,6 +158,97 @@ std::vector<SchedPlan> premise_interleave(int ndevs, int nmicros) {
 }
 
 
+void expected_filters(std::vector<SchedPlan>& scheds) {
+
+    Plans filtered;
+    for (std::size_t idx = 0; idx < scheds.size(); ++idx) {
+        auto step_blks = scheds[idx].stepBlocks(0);
+        if (!(step_blks.size() == 1 and 
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+        
+        step_blks = scheds[idx].stepBlocks(3);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+        /*
+        step_blks = scheds[idx].stepBlocks(4);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(7);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(8);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+        
+        step_blks = scheds[idx].stepBlocks(11);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(12);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(13);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(16);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(17);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(18);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(21);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(22);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(25);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(26);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+
+        step_blks = scheds[idx].stepBlocks(29);
+        if (!(step_blks.size() == 1 and
+              scheds[idx].getDevice(step_blks[0]).size() == 4)
+        ) continue;
+        */
+
+        filtered.push_back(scheds[idx]);
+    }
+    std::cout << "Filter out " << filtered.size() << " plans." << std::endl;
+    std::cout << "one solution:\n" << filtered[0] << std::endl;
+}
+
 void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float dev_memory, int nworkers) {
 
     CpuTimer timer;
@@ -189,6 +280,8 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
     else {
         std::cout << "one solution:\n" << opt_plans[0] << std::endl;
     }
+
+    // expected_filters(opt_plans);
     // for (int idx = 0; idx < opt_plans.size(); ++idx) { std::cout << "plan#" << idx << ":\n" << opt_plans[idx] << std::endl;}
 
     timer.start();
@@ -203,7 +296,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         );
 
         if ((idx+1) % 10 == 0) {
-            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << "plans\n";
+            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << " plans\n";
         }
 
         if (gsched.isEmpty()) {
