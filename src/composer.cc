@@ -261,7 +261,7 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
     // std::cout << "memory conflict: " << mem_conflict << std::endl;
 
     std::vector< std::set<Block*> > all_shifts = Composer::getShiftSpace(
-        ndevs, step_conflict, mem_conflict, blk2hash
+        ndevs, micros, step_conflict, mem_conflict, blk2hash, blk2idx
     );
 
     // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
@@ -288,6 +288,7 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
             // pruning technique: discard plans that exceed opt_step
             bool discard = false;
             for (auto& micro : cmicros) {
+                // ==========> change this to upper_opt_step - 1 will make faster
                 if (micro.nSteps() > upper_opt_step) {
                     discard = true;
                     break;
@@ -305,9 +306,11 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
 
 std::vector<std::set<Block*>>
 Composer::getShiftSpace(const int ndevice,
+                        const Plans& micros,
                         const Conflict& step_conflict,
                         const Conflict& mem_conflict,
-                        const Block2Hash& blk2hash) {
+                        const Block2Hash& blk2hash,
+                        const Block2Idx& blk2idx) {
 
     // set up candidates by pruning out same blocks
     std::unordered_map<int, Block*> keep_uids;
@@ -380,8 +383,64 @@ Composer::getShiftSpace(const int ndevice,
                         }
                 }
                 if (!exist) {
-                    // printf("....success!\n");
-                    all_keeps.push_back(item.first);
+                    // dynamic symmetric pruning technique
+                    bool discard = false;
+                    // we only consider block at step-1, if no block in step-1, this indicates
+                    // there are blocks in kblock.before happen at step-1,
+                    // otherwise kblock can be put on step-1.
+                    for (auto& kblk : item.first) {
+                        //printf("start\n");
+                        std::set<Block*> exblks;
+                        bool exchangable = true;
+                        int micro_idx = blk2idx.at(kblk);
+                        //printf("here1: micro_idx: %d\n", micro_idx);
+                        int step = micros[micro_idx].getStep(kblk);
+                        if (step == 0) break;
+                        // before block 
+                        for (auto& bblk : kblk->before) {
+                            if (micros[micro_idx].haveBlock(bblk) && micros[micro_idx].getStep(bblk) == step-1) {
+                                exchangable = false;
+                                break;
+                            }
+                        }
+                        //printf("here2\n");
+                        if (!exchangable) continue;
+                        // after block
+                        for (int devid : micros[micro_idx].getDevice(kblk)) {
+                            for (auto& micro : micros) {
+                                Block* exblk = micro.getBlock(devid, step-1);
+                                if (exblk == nullptr) continue;
+                                exblks.insert(exblk);
+                                // exchange will not change peak memory
+                                if (exblk->memory * kblk->memory < 0) {
+                                    exchangable = false;
+                                    break;
+                                }
+                                // exchange will not break dependency 
+                                for (auto& ablk : exblk->after) {
+                                    if (micro.haveBlock(ablk) and micro.getStep(ablk) == step and item.first.find(ablk) != item.first.end()) {
+                                        exchangable = false;
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        //printf("here3\n");
+                        if (exchangable) {
+                            for (auto& exblk : exblks) {
+                                if (exblk->mid > kblk->mid) {
+                                    discard = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!discard) {
+                        // printf("....success!\n");
+                        all_keeps.push_back(item.first);
+                    }
                 }
             }
         }
