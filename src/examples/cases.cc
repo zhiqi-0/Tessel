@@ -318,7 +318,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
             gsched.destroyCreatedBlocks();
         }
         if (min_bubble_rate == 0) {
-            std::cout << "early stop as found 0-buuble plan\n";
+            std::cout << "early stop as found 0-bubble plan\n";
             break;
         }
     }

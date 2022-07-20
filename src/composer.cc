@@ -185,7 +185,7 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                 next.resize(total_next);
                 for (int local_opt : local_opts) {
                     if (local_opt < opt_step) {
-                        if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
+                        if (!silence) { printf("find fewer steps: %d\n", local_opt); }
                         opt_step = local_opt;
                         schedules.clear();
                     }
@@ -209,21 +209,6 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                     );
                 }
             }
-
-            // #pragma omp critical
-            // {
-            //     //int _x; std::cin >> _x;
-            //     next.insert(next.end(), local_next.begin(), local_next.end());
-            //     if (local_opt_step < opt_step) {
-            //         if (!silence) { printf("find fewer steps: %d\n", local_opt_step); }
-            //         opt_step = local_opt_step;
-            //         schedules.clear();
-            //     }
-            //     if (local_opt_step == opt_step) {
-            //         schedules.insert(
-            //             schedules.end(), local_schedules.begin(), local_schedules.end());
-            //     }
-            // }
         }
 
         total_status += next.size();
