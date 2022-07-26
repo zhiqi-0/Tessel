@@ -78,35 +78,29 @@ std::vector<SchedPlan> premise_chimera(int ndevs, int nmicros) {
     }
     for (int mid = 0; mid < nmicros / 2; ++mid) {
         SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> fblocks(ndevs, nullptr);
-        std::vector<Block*> bblocks(ndevs, nullptr);
+        std::vector<Block*> blocks(ndevs * 2, nullptr);
+        std::vector<int> devs(ndevs * 2, -1);
         for (int devid = 0; devid < ndevs; ++devid) {
-            fblocks[devid] = new Block(mid ,BlockType::Forward, 1.0, 1.0);
-            micro.addBlock(fblocks[devid], devid, devid);
+            blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
+            devs[devid] = devid;
+            blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+            devs[2*ndevs-1-devid] = devid;
         }
-        for (int devid = 0; devid < ndevs; ++devid) {
-            bblocks[devid] = new Block(mid ,BlockType::Backward, 1.0, 1.0);
-            micro.addBlock(bblocks[devid], ndevs-1-devid, ndevs+devid);
-        }
-        std::vector<Block*> blocks(fblocks);
-        blocks.insert(blocks.end(), bblocks.begin(), bblocks.end());
+        micro.addBlockSeq(blocks, devs);
         Block::addDependencies(blocks);
         micros.push_back(micro);
     }
     for (int mid = nmicros / 2; mid < nmicros; ++mid) {
         SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> fblocks(ndevs, nullptr);
-        std::vector<Block*> bblocks(ndevs, nullptr);
-        for (int devid = 0; devid < ndevs; ++devid) {
-            fblocks[devid] = new Block(mid ,BlockType::Forward, 1.0, 1.0);
-            micro.addBlock(fblocks[devid], ndevs-1-devid, devid);
+        std::vector<Block*> blocks(ndevs * 2, nullptr);
+        std::vector<int> devs(ndevs * 2, -1);
+        for (int idx = 0; idx < ndevs; ++idx) {
+            blocks[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+            devs[idx] = ndevs-1-idx;
+            blocks[2*ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+            devs[2*ndevs-1-idx] = ndevs-1-idx;
         }
-        for (int devid = 0; devid < ndevs; ++devid) {
-            bblocks[devid] = new Block(mid ,BlockType::Backward, 1.0, 1.0);
-            micro.addBlock(bblocks[devid], devid, ndevs+devid);
-        }
-        std::vector<Block*> blocks(fblocks);
-        blocks.insert(blocks.end(), bblocks.begin(), bblocks.end());
+        micro.addBlockSeq(blocks, devs);
         Block::addDependencies(blocks);
         micros.push_back(micro);
     }

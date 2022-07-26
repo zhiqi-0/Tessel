@@ -251,7 +251,7 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
 
     // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
     // for (auto shifts : all_shifts) {std::cout << "shift: "; for (auto blk : shifts) printf("%s(%d) ", blk->toStr().c_str(), blk->mid); std::cout << std::endl; }
-    // { int _x; std::cin >> _x; }
+    // { if (step >= 9) { int _x; std::cin >> _x; } }
 
     for (auto& shifts : all_shifts) {
 
@@ -315,24 +315,33 @@ Composer::getShiftSpace(const int ndevice,
     std::set<int> lock_devices;
     for (auto& it : keep_uids) {
         Block* blk = it.second;
-        bool searchable = true;
+        int mid = blk2idx.at(blk);
+        if (!micros[mid].isTheStart(blk, step_conflict.step)) {
+            keep_candidates.insert(blk);
+            for (int devid : step_conflict.getDevice(blk)) {
+                if (lock_devices.find(devid) != lock_devices.end()) {
+                    std::cerr << "================= Error =================" << std::endl;
+                    std::cerr << "micros:\n";
+                    for (auto& micro : micros) std::cerr << micro << std::endl;
+                    std::cerr << "Error block: " << *blk << " Resolving step: " << step_conflict.step << std::endl;
+                    std::cerr << "================= Error =================" << std::endl;
+                    throw std::runtime_error("Line 328: find two blocks get conflicted.\n");
+                }
+                lock_devices.insert(devid);
+            }
+        }
+    }
+    for (auto& it : keep_uids) {
+        Block* blk = it.second;
+        bool can_be_candidate = true;
         for (int devid : step_conflict.getDevice(blk)) {
             if (lock_devices.find(devid) != lock_devices.end()) {
-                searchable = false;
+                can_be_candidate = false;
                 break;
             }
         }
         int mid = blk2idx.at(blk);
-        if (!micros[mid].isTheStart(blk, step_conflict.step)) {
-            if (!searchable) {
-                throw std::runtime_error("Line 328: find two block get conflicted.\n");
-            }
-            for (int devid : step_conflict.getDevice(blk)) {
-                lock_devices.insert(devid);
-            }
-            keep_candidates.insert(blk);
-        }
-        else if (searchable) {
+        if (micros[mid].isTheStart(blk, step_conflict.step) and can_be_candidate) {
             keep_candidates.insert(blk);
         }
     }
