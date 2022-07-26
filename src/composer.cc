@@ -312,8 +312,29 @@ Composer::getShiftSpace(const int ndevice,
         }
     }
     std::set<Block*> keep_candidates;
+    std::set<int> lock_devices;
     for (auto& it : keep_uids) {
-        keep_candidates.insert(it.second);
+        Block* blk = it.second;
+        bool searchable = true;
+        for (int devid : step_conflict.getDevice(blk)) {
+            if (lock_devices.find(devid) != lock_devices.end()) {
+                searchable = false;
+                break;
+            }
+        }
+        int mid = blk2idx.at(blk);
+        if (!micros[mid].isTheStart(blk, step_conflict.step)) {
+            if (!searchable) {
+                throw std::runtime_error("Line 328: find two block get conflicted.\n");
+            }
+            for (int devid : step_conflict.getDevice(blk)) {
+                lock_devices.insert(devid);
+            }
+            keep_candidates.insert(blk);
+        }
+        else if (searchable) {
+            keep_candidates.insert(blk);
+        }
     }
     // printf("candidates: "); for (Block* blk : keep_candidates) { printf("%s(%d) ", blk->toStr().c_str(), blk->mid); } std::cout << std::endl;
 
@@ -458,7 +479,7 @@ Composer::getShiftSpace(const int ndevice,
 Conflict Composer::getStepConflict(const std::vector<SchedPlan>& micros, int step,
                                    const Block2Hash& blk2hash) {
     const int ndevs = micros.at(0).nDevs();
-    Conflict conflict(ndevs);
+    Conflict conflict(ndevs, step);
     for (int devid = 0; devid < ndevs; ++devid) {
         std::vector<Block*> blks;
         for (auto& micro : micros) {
@@ -480,7 +501,7 @@ Conflict Composer::getStepConflict(const std::vector<SchedPlan>& micros, int ste
 Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step,
                                   const std::vector<float>& memory, const Block2Hash& blk2hash) {
     const int ndevs = micros.at(0).nDevs();
-    Conflict conflict(ndevs);
+    Conflict conflict(ndevs, step);
 
     std::vector<float> devmem(ndevs, 0.0);
     for (int devid = 0; devid < ndevs; ++devid) {

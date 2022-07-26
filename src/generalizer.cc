@@ -72,6 +72,7 @@ SchedPlan& Generalizer::loosen(SchedPlan& sched, Block* blk, const std::vector<f
     }
     if (maxstep <= step) return sched;
 
+    int free_steps = 0;
     for (int t = maxstep - 1; t > step; --t) {
         // check step slots
         bool have_block = false;
@@ -81,7 +82,17 @@ SchedPlan& Generalizer::loosen(SchedPlan& sched, Block* blk, const std::vector<f
                 break;
             }
         }
-        if (have_block) continue;
+        if (have_block) {
+            free_steps = 0;
+            continue;
+        }
+        else {
+            free_steps += 1;
+            if (free_steps < blk->span) {
+                continue;
+            }
+        }
+
         // check memory
         bool exceed_memory = false;
         sched.setPosition(blk, devids, t);

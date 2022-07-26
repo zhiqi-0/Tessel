@@ -22,13 +22,13 @@ class Block {
 
     int mid;
     float memory;
-    float span;
+    int span;
     BlockType btype;
     // dependency track
     std::set<Block*> before;
     std::set<Block*> after;
     
-    Block(int mid, BlockType btype, float memory = 1, float span = 1) {
+    Block(int mid, BlockType btype, float memory = 1, int span = 1) {
         this->mid = mid;
         this->btype = btype;
         this->span = span;
@@ -36,6 +36,9 @@ class Block {
             this->memory = std::abs(memory);
         else
             this->memory = 0.0 - std::abs(memory);
+        if (span < 1) {
+            throw std::runtime_error("cannot set a block with span samller than 1\n");
+        }
         this->span = span;
         _uid = UniqueID::GetInstance()->GetUid();
     }
@@ -80,13 +83,17 @@ class Block {
 };
 
 
-class SchedPlan{
+class SchedPlan {
 
  protected:
 
+    // all blocks in the plan
     std::set<Block*> _blocks;
+    // the devices of a block
     std::unordered_map<Block*, std::vector<int>> _block_devices;
+    // the start step of block
     std::unordered_map<Block*, int> _block_steps;
+    // the 2D plan of: row-device | col-step
     std::vector< std::vector<Block*> > _plans;
 
     int _ndevs;
@@ -114,11 +121,35 @@ class SchedPlan{
 
     // ***** Plan Modifier ********
 
+    /**
+     * @brief Reset the block position
+     * 
+     */
     void setPosition(Block* blk, std::vector<int> devices, int step);
 
+    /**
+     * @brief Add a block into the schedule plan
+     * 
+     */
     void addBlock(Block* block, std::vector<int> devices, int step);
 
+    /**
+     * @brief Add a block into the schedule plan
+     * 
+     */
     void addBlock(Block* block, int device, int step);
+
+    /**
+     * @brief Add a block sequence into the schedule plan
+     * 
+     */
+    void addBlockSeq(const std::vector<Block*>& blocks, const std::vector< std::vector<int> >& devices);
+
+    /**
+     * @brief Add a block sequence into the schedule plan
+     * 
+     */
+    void addBlockSeq(const std::vector<Block*>& blocks, const std::vector<int>& devices);
 
     // ***** Plan Property ********
 
@@ -130,14 +161,33 @@ class SchedPlan{
 
     float peakMemory(int devid, int from_step = 0, int to_step = -1) const;
 
+    /**
+     * @brief Get current memory of device devid until to_step
+     * @note the first block that its start step is before `start_step` but
+     * its end step is after `start_step` will not be considered.
+     * @note the last block that its start step is before `end_step` but
+     * its end step is after `end_step` will be considered.
+     */
     float currMemory(int devid, int from_step = 0, int to_step = -1) const;
 
+    /**
+     * @brief Get bubble rate of this plan
+     * 
+     */
     float bubble_rate(int from_step = 0, int to_step = -1) const;
 
     // ***** Plan Block Access ********
 
+    /**
+     * @brief Get devices of the block
+     * 
+     */
     std::vector<int> getDevice(Block* blk) const;
 
+    /**
+     * @brief Get block steps
+     * 
+     */
     int getStep(Block* blk) const;
 
     inline Block* getBlock(const int devid, const int step) const {
@@ -149,18 +199,51 @@ class SchedPlan{
 
     std::vector<Block*> stepBlocks(int step) const;
 
+    /**
+     * @brief Get blocks on a device
+     * @note the first block that its start step is before `start_step` but
+     * its end step is after `start_step` will not be considered.
+     * @note the last block that its start step is before `end_step` but
+     * its end step is after `end_step` will be considered.
+     */
     std::vector<Block*> devBlocks(int devid, int start_step, int end_step = -1) const;
 
+    /**
+     * @brief Check whether the block is in the plan
+     */
     inline bool haveBlock(Block* block) const { return _blocks.find(block) != _blocks.end(); }
+
+    /**
+     * @brief Check whether the block is starting at `step`.
+     */
+    inline bool isTheStart(Block* block, int step) const { return _block_steps.at(block) == step; }
 
     // ***** Plan Selection and Creation ********
 
+    /**
+     * @brief Create a schedule plan that only contains blocks in steps of
+     * [from_step, to_step].
+     * @note the first block that its starting step is before `from_step` but
+     * its ending step is after `start_step` will not be considered.
+     * @note the last block that its starting step is before `end_step` but
+     * its ending step is after `end_step` will be considered.
+     */
     SchedPlan selectSteps(int from_step, int to_step) const;
 
+    /**
+     * @brief Create a schedule plan only containing the set of blocks.
+     */
     SchedPlan selectBlocks(const std::set<Block*>& blocks) const;
 
     SchedPlan selectMicros(const std::set<int>& micro_ids) const;
 
+    /**
+     * @brief Increase micro batch id for each block in the micro.
+     * The result will be in a new instance.
+     * 
+     * @warning this will allocate memory for blocks, user should
+     * manually delete them after finished the use.
+     */
     SchedPlan increaseMid(const int increase_mid) const;
 
     static SchedPlan concat(std::vector<SchedPlan>& plans);

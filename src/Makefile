@@ -17,11 +17,11 @@ ${BUILD}/schedplan.o: include/schedplan.h include/unique.h schedplan.cc
 	mkdir -p ${BUILD}
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/schedplan.o -c schedplan.cc
 
-${BUILD}/composer.o: ${BUILD}/schedplan.o include/composer.h composer.cc
+${BUILD}/composer.o: include/schedplan.h include/unique.h include/composer.h composer.cc
 	mkdir -p ${BUILD}
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/composer.o -c composer.cc
 
-${BUILD}/generalizer.o: ${BUILD}/composer.o include/generalizer.h generalizer.cc
+${BUILD}/generalizer.o: include/schedplan.h include/unique.h include/composer.h include/generalizer.h generalizer.cc
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o ${BUILD}/generalizer.o -c generalizer.cc
 
 ${BUILD}/libtetris.so: ${BUILD}/unique.o ${BUILD}/schedplan.o ${BUILD}/composer.o ${BUILD}/generalizer.o

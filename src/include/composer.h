@@ -40,9 +40,10 @@ class Conflict {
  public:
     std::unordered_map< int, std::set<Block*> > device2blocks;
     std::unordered_map<Block*, std::vector<int> > block2device;
+    int step;
 
-    Conflict() {};
-    Conflict(int ndevs) {
+    Conflict(): step(-1) {};
+    Conflict(int ndevs, int step) : step(step) {
         for (int devid = 0; devid < ndevs; ++devid) {
             device2blocks.emplace(devid, std::set<Block*>());
         }
@@ -105,6 +106,10 @@ class Composer {
     static Plans stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
                              bool prune_symm = true, bool silence = false, int opt_step_upbound = -1,
                              int nworkers = 1);
+
+    // static Plans stepOptimalDFS(Plans micros, const std::vector<float>& memory,
+    //                             bool prune_symm = true, bool silence = false, int opt_step_upbound = -1,
+    //                             int nworkers = 1);
 
     static std::pair<std::vector<Plans>, std::vector<SchedPlan>>
     resolveStep(const Plans& micros, const std::vector<float>& memory,
