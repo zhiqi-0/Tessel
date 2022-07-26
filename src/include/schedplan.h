@@ -228,7 +228,7 @@ class SchedPlan {
      * @note the last block that its starting step is before `end_step` but
      * its ending step is after `end_step` will be considered.
      */
-    SchedPlan selectSteps(int from_step, int to_step) const;
+    SchedPlan selectSteps(int from_step, int to_step = -1) const;
 
     /**
      * @brief Create a schedule plan only containing the set of blocks.

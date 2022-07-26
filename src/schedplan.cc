@@ -278,6 +278,7 @@ std::vector<Block*> SchedPlan::devBlocks(int devid, int from_step, int to_step) 
 
 SchedPlan SchedPlan::selectSteps(int from_step, int to_step) const {
     SchedPlan sched(_ndevs, _reserve_steps);
+    to_step = (to_step == -1 or to_step > _maxsteps) ? _maxsteps + 1 : to_step;
     for (int step = from_step; step < to_step; ++step) {
         for (auto blk : this->stepBlocks(step)) {
             auto devids = this->getDevice(blk);

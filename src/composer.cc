@@ -158,7 +158,26 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
                             opt_step_bound += micro.nSteps() - step - 1;
                         }
                     }
-                    local_opt_step = std::min(local_opt_step, opt_step_bound);
+                    if (opt_step_bound < local_opt_step) {
+                        local_schedules.clear();
+                        local_opt_step = opt_step_bound;
+                    }
+                    // if (opt_step_bound == local_opt_step) {
+                    //     Plans stack_part;
+                    //     Plans concat_part;
+                    //     for (auto& micro : ms) {
+                    //         stack_part.push_back(micro.selectSteps(0, step+1));
+                    //         concat_part.push_back(micro.selectSteps(step+1, -1));
+                    //     }
+                    //     SchedPlan stacked = SchedPlan::stack(stack_part);
+                    //     SchedPlan concated = SchedPlan::concat(concat_part);
+                    //     Plans to_concat = {stacked, concated};
+                    //     SchedPlan sched = SchedPlan::concat(to_concat);
+                    //     std::cout << "--stacked\n" << stacked << std::endl;
+                    //     std::cout << "--concated\n" << concated << std::endl;
+                    //     std::cout << "--\n" << sched << std::endl;
+                    //     local_schedules.push_back(sched);
+                    // }
                 }
 
                 for (auto& sched : candidates_and_schedules.second) {
@@ -250,8 +269,9 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
     );
 
     // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
-    // for (auto shifts : all_shifts) {std::cout << "shift: "; for (auto blk : shifts) printf("%s(%d) ", blk->toStr().c_str(), blk->mid); std::cout << std::endl; }
-    // { if (step >= 9) { int _x; std::cin >> _x; } }
+    // std::cout << "memory constraints: "; for (float mem : memory) std::cout << mem << " "; std::cout << std::endl;
+    // for (auto shifts : all_shifts) {std::cout << "shift(" << all_shifts.size() << "): "; for (auto blk : shifts) printf("%s(%d) ", blk->toStr().c_str(), blk->mid); std::cout << std::endl; }
+    // { if (micros.size() == 2) { int _x; std::cin >> _x; } }
 
     for (auto& shifts : all_shifts) {
 
@@ -469,7 +489,7 @@ Composer::getShiftSpace(const int ndevice,
     std::vector<std::set<Block*> > all_shifts;
     std::set<Block*> all_blks;
     auto step_cblks = step_conflict.allBlocks();
-    auto mem_cblks = step_conflict.allBlocks();
+    auto mem_cblks = mem_conflict.allBlocks();
     all_blks.insert(step_cblks.begin(), step_cblks.end());
     all_blks.insert(mem_cblks.begin(), mem_cblks.end());
     for (auto& keep : all_keeps) {
@@ -521,6 +541,9 @@ Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step
 
     for (std::size_t mid = 0; mid < micros.size(); ++mid) {
         for (auto blk : micros[mid].stepBlocks(step)) {
+            if (!micros[mid].isTheStart(blk, step)) {
+                continue;
+            }
             std::vector<int> devs = micros[mid].getDevice(blk);
             bool need_shift = false;
             for (int dev : devs) {
