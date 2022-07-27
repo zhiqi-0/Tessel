@@ -76,6 +76,10 @@ class SchedulePlan:
         self._blocks.add(block)
 
     def add_block_seq(self, blocks: List[Block], bdevs: List[List[int]]):
+        print('> adding block sequence:')
+        dscps = [repr(blk) + repr(tuple(devs)) for blk, devs in zip(blocks, bdevs)]
+        print(' -> '.join(dscps))
+
         step = 0
         for block, devs in zip(blocks, bdevs):
             self.add_block(block, devs, step)
@@ -167,7 +171,7 @@ class SchedulePlan:
         dscp = ''
         nsteps = max(start + blk.span for blk, start in solution.items())
         for devid in range(self.ndevs):
-            for step in range(0, nsteps):
+            while step < nsteps:
                 have_block = False
                 for blk, start in solution.items():
                     if devid in self.get_device(blk) and step == start:
@@ -177,6 +181,7 @@ class SchedulePlan:
                         break
                 if not have_block:
                     dscp += ' --'
+                    step += 1
             dscp += '\n'
         return dscp
 
@@ -195,7 +200,7 @@ class Premise:
         for mid in range(nmicros):
             fblocks = [Block(mid, Block.BType.FW, span=1) for _ in range(ndevs)]
             fdevs = [[devid] for devid in range(ndevs)]
-            bblocks = [Block(mid, Block.BType.BW, span=1) for _ in range(ndevs)]
+            bblocks = [Block(mid, Block.BType.BW, span=2) for _ in range(ndevs)]
             bdevs = [[devid] for devid in range(ndevs)][::-1]
             blocks = fblocks + bblocks
             devs = fdevs + bdevs
@@ -203,7 +208,7 @@ class Premise:
             sched.add_dependency(blocks)
         return sched
 
-
+    @staticmethod
     def chimera(ndevs: int, nmicros: int) -> SchedulePlan:
         """
         f             b        f b
@@ -214,27 +219,28 @@ class Premise:
         sched = SchedulePlan(ndevs)
         assert nmicros % 2 == 0, "require microbatch# can be devided by 2"
         for mid in range(nmicros // 2): # V shape
-            fblocks = [Block(mid, Block.BType.FW, f'f{mid}d{devid}', mem=1) for devid in range(ndevs)]
-            bblocks = [Block(mid, Block.BType.BW, f'b{mid}d{devid}', mem=1) for devid in range(ndevs-1,-1,-1)]
-            blocks = fblocks + bblocks
-            for idx in range(ndevs * 2 - 1):
-                Block.add_dependency(blocks[idx], blocks[idx+1])
+            blocks = [None] * ndevs * 2
+            devs = [None] * ndevs * 2
             for devid in range(ndevs):
-                sched.add_block(fblocks[devid], devid)
-                sched.add_block(bblocks[ndevs-1-devid], devid)
-        for mid in range(nmicros // 2): # ^ shape
-            mid = mid + nmicros // 2
-            fblocks = [Block(mid, Block.BType.FW, f'f{mid}d{devid}', mem=1) for devid in range(ndevs-1,-1,-1)]
-            bblocks = [Block(mid, Block.BType.BW, f'b{mid}d{devid}', mem=1) for devid in range(ndevs)]
-            blocks = fblocks + bblocks
-            for idx in range(ndevs * 2 - 1):
-                Block.add_dependency(blocks[idx], blocks[idx+1])
+                blocks[devid] = Block(mid, Block.BType.FW, span=1)
+                devs[devid] = [devid]
+                blocks[-1-devid] = Block(mid, Block.BType.BW, span=2)
+                devs[-1-devid] = [devid]
+            sched.add_block_seq(blocks, devs)
+            sched.add_dependency(blocks)
+        for mid in range(nmicros // 2, nmicros): # ^ shape
+            blocks = [None] * ndevs * 2
+            devs = [None] * ndevs * 2
             for devid in range(ndevs):
-                sched.add_block(fblocks[ndevs-1-devid], devid)
-                sched.add_block(bblocks[devid], devid)
+                blocks[devid] = Block(mid, Block.BType.FW, span=1)
+                devs[devid] = [ndevs-1-devid]
+                blocks[-1-devid] = Block(mid, Block.BType.BW, span=2)
+                devs[-1-devid] = [ndevs-1-devid]
+            sched.add_block_seq(blocks, devs)
+            sched.add_dependency(blocks)
         return sched
 
-
+    @staticmethod
     def interleave(ndevs: int, nmicros: int) -> SchedulePlan:
         """
         f f   f         b   b b
@@ -246,22 +252,25 @@ class Premise:
         for mid in range(nmicros):
             fblocks = []
             bblocks = []
-            for step in range(ndevs+2):
-                if step in [0, ndevs // 2 + 1]:
-                    fdevid = bdevid = tuple(range(ndevs))
-                    fblock = Block(mid, Block.BType.FW, f'fe{step}{mid}devall', mem=1)
-                    bblock = Block(mid, Block.BType.BW, f'be{step}{mid}devall', mem=1)
-                else:
-                    fdevid = bdevid = step - 1 if step < ndevs // 2 + 1 else step - 2
-                    fblock = Block(mid, Block.BType.FW, f'f{mid}dev{fdevid}', mem=1)
-                    bblock = Block(mid, Block.BType.BW, f'b{mid}dev{bdevid}', mem=1)
-                fblocks.append(fblock)
-                bblocks.append(bblock)
-                sched.add_block(fblock, fdevid)
-                sched.add_block(bblock, bdevid)
-            blocks = fblocks + bblocks[::-1]
-            for idx in range((ndevs + 2) * 2 - 1):
-                Block.add_dependency(blocks[idx], blocks[idx+1])
+            fblocks = [Block(mid, Block.BType.FW, span=1) for _ in range(ndevs)]
+            fdevs = [[devid] for devid in range(ndevs)]
+            bblocks = [Block(mid, Block.BType.BW, span=2) for _ in range(ndevs)]
+            bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+            #
+            fblocks.insert(ndevs // 2, Block(mid, Block.BType.FW, span=1))
+            fdevs.insert(ndevs // 2, list(range(ndevs)))
+            bblocks.insert(ndevs // 2, Block(mid, Block.BType.BW, span=2))
+            bdevs.insert(ndevs // 2, list(range(ndevs)))
+            # 
+            fblocks.insert(0, Block(mid, Block.BType.FW, span=1))
+            fdevs.insert(0, list(range(ndevs)))
+            bblocks.insert(len(bblocks), Block(mid, Block.BType.BW, span=2))
+            bdevs.insert(len(bblocks), list(range(ndevs)))
+
+            blocks = fblocks + bblocks
+            devs = fdevs + bdevs
+            sched.add_block_seq(blocks, devs)
+            sched.add_dependency(blocks)
         return sched
 
 
