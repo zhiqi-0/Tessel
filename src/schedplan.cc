@@ -32,16 +32,19 @@ SchedPlan::SchedPlan(const SchedPlan& plan) {
 // ***** Plan Modifier ********
 
 void SchedPlan::addBlock(Block* block, std::vector<int> devids, int step) {
-    if (step + block->span - 1 >= this->_reserve_steps) this->reserve(step * 2);
+    if (step + block->span - 1 >= this->_reserve_steps) this->reserve((step + block->span - 1) * 2);
     if (this->haveBlock(block)) {
-        throw std::runtime_error("Try to double-add a block.");
+        throw std::runtime_error("Try to double-add a block.\n");
     }
-    for (const auto& devid : devids) {
+    for (int devid : devids) {
         for (int t = step; t < step + block->span; ++t) {
-            if (this->_plans.at(devid)[t] != nullptr) {
-                throw std::runtime_error("Try to add a block with conflict postion on others.");
+            if (devid >= this->_ndevs or devid < 0) {
+                throw std::runtime_error("Try to add a block out of device range.\n");
             }
-            this->_plans.at(devid)[t] = block;
+            if (this->_plans.at(devid)[t] != nullptr) {
+                throw std::runtime_error("Try to add a block with conflict postion on others.\n");
+            }
+            this->_plans[devid][t] = block;
         }
     }
     this->_blocks.insert(block);
@@ -52,7 +55,7 @@ void SchedPlan::addBlock(Block* block, std::vector<int> devids, int step) {
 
 
 void SchedPlan::addBlock(Block* block, int device, int step) {
-    if (step + block->span - 1 >= this->_reserve_steps) this->reserve(step * 2);
+    if (step + block->span - 1 >= this->_reserve_steps) this->reserve((step + block->span - 1) * 2);
     if (this->haveBlock(block)) {
         throw std::runtime_error("Try to double-add a block.");
     }
@@ -100,7 +103,7 @@ void SchedPlan::addBlockSeq(const std::vector<Block*>& blocks,
 
 
 void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
-    if (step + block->span - 1 >= this->_reserve_steps) this->reserve(step * 2);
+    if (step + block->span - 1 >= this->_reserve_steps) this->reserve((step + block->span - 1) * 2);
     if (!this->haveBlock(block)) {
         throw std::runtime_error("Try to reset a block that not exists.");
     }

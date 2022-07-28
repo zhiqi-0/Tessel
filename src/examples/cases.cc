@@ -44,111 +44,122 @@ class CpuTimer {
 };
 
 
-std::vector<SchedPlan> premise_vshape(int ndevs, int nmicros) {
-    std::vector<SchedPlan> micros;
-    for (int mid = 0; mid < nmicros; ++mid) {
-        SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> blocks(ndevs * 2, nullptr);
-        std::vector<int> devs(ndevs * 2, -1);
-        for (int devid = 0; devid < ndevs; ++devid) {
-            blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
-            devs[devid] = devid;
-            blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
-            devs[2*ndevs-1-devid] = devid;
-        }
-        micro.addBlockSeq(blocks, devs);
-        Block::addDependencies(blocks);
-        micros.push_back(micro);
-    }
-    return micros;
-}
+class Premise {
 
+ public:
 
-std::vector<SchedPlan> premise_chimera(int ndevs, int nmicros) {
-    /**
-     * @brief chimera premise: bi-pipe
-     *  f             b        f b
-     *    f         b        f     b
-     *      f     b        f         b
-     *        f b        f             b
-     */
-    std::vector<SchedPlan> micros;
-    if (nmicros % 2 != 0) {
-        throw std::runtime_error("Expected nmicros % 2 == 0");
-    }
-    for (int mid = 0; mid < nmicros / 2; ++mid) {
-        SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> blocks(ndevs * 2, nullptr);
-        std::vector<int> devs(ndevs * 2, -1);
-        for (int devid = 0; devid < ndevs; ++devid) {
-            blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
-            devs[devid] = devid;
-            blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
-            devs[2*ndevs-1-devid] = devid;
-        }
-        micro.addBlockSeq(blocks, devs);
-        Block::addDependencies(blocks);
-        micros.push_back(micro);
-    }
-    for (int mid = nmicros / 2; mid < nmicros; ++mid) {
-        SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> blocks(ndevs * 2, nullptr);
-        std::vector<int> devs(ndevs * 2, -1);
-        for (int idx = 0; idx < ndevs; ++idx) {
-            blocks[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
-            devs[idx] = ndevs-1-idx;
-            blocks[2*ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
-            devs[2*ndevs-1-idx] = ndevs-1-idx;
-        }
-        micro.addBlockSeq(blocks, devs);
-        Block::addDependencies(blocks);
-        micros.push_back(micro);
-    }
-    return micros;
-}
-
-
-std::vector<SchedPlan> premise_interleave(int ndevs, int nmicros) {
-    /**
-     * @brief interleave premise
-     *
-     * f f   f         b   b b
-     * f   f f         b b   b
-     * f     f f     b b     b
-     * f     f   f b   b     b
-     * 
-     */
-    std::vector<SchedPlan> micros;
-    for (int mid = 0; mid < nmicros; ++mid) {
-        SchedPlan micro(ndevs, ndevs);
-        std::vector<Block*> fblocks(ndevs+2, nullptr);
-        std::vector<Block*> bblocks(ndevs+2, nullptr);
-        for (int step = 0; step < ndevs + 2; ++step) {
-            if (step == 0 or step == ndevs / 2 + 1) {
-                fblocks[step] = new Block(mid, BlockType::Forward, 1.0, 1.0);
-                std::vector<int> all_device(ndevs);
-                for (int devid = 0; devid < ndevs; ++devid) {
-                    all_device[devid] = devid;
-                }
-                micro.addBlock(fblocks[step], all_device, step);
-                bblocks[ndevs+1-step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
-                micro.addBlock(bblocks[ndevs+1-step], all_device, (ndevs+2)*2-1-step);
+    static std::vector<SchedPlan> vshape(int ndevs, int nmicros) {
+        std::vector<SchedPlan> micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs);
+            std::vector<Block*> blocks(ndevs * 2, nullptr);
+            std::vector<int> devs(ndevs * 2, -1);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs[devid] = devid;
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs[2*ndevs-1-devid] = devid;
             }
-            else {
-                int dev = (step < ndevs / 2 + 1) ? step - 1 : step - 2;
-                fblocks[step] = new Block(mid, BlockType::Forward, 1.0, 1.0);
-                micro.addBlock(fblocks[step], dev, step);
-                bblocks[ndevs+1-step] = new Block(mid, BlockType::Backward, 1.0, 1.0);
-                micro.addBlock(bblocks[ndevs+1-step], dev, (ndevs+2)*2-1-step);
-            }
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
+            micros.push_back(micro);
         }
-        std::vector<Block*> blocks(fblocks);
-        blocks.insert(blocks.end(), bblocks.begin(), bblocks.end());
-        Block::addDependencies(blocks);
-        micros.push_back(micro);
+        return micros;
     }
-    return micros;
-}
+
+
+    static std::vector<SchedPlan> chimera(int ndevs, int nmicros) {
+        /**
+         * @brief chimera premise: bi-pipe
+         *  f             b        f b
+         *    f         b        f     b
+         *      f     b        f         b
+         *        f b        f             b
+         */
+        std::vector<SchedPlan> micros;
+        if (nmicros % 2 != 0) {
+            throw std::runtime_error("Expected nmicros % 2 == 0");
+        }
+        for (int mid = 0; mid < nmicros / 2; ++mid) {
+            SchedPlan micro(ndevs, ndevs);
+            std::vector<Block*> blocks(ndevs * 2, nullptr);
+            std::vector<int> devs(ndevs * 2, -1);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs[devid] = devid;
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs[2*ndevs-1-devid] = devid;
+            }
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
+            micros.push_back(micro);
+        }
+        for (int mid = nmicros / 2; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs);
+            std::vector<Block*> blocks(ndevs * 2, nullptr);
+            std::vector<int> devs(ndevs * 2, -1);
+            for (int idx = 0; idx < ndevs; ++idx) {
+                blocks[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs[idx] = ndevs-1-idx;
+                blocks[2*ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs[2*ndevs-1-idx] = ndevs-1-idx;
+            }
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
+            micros.push_back(micro);
+        }
+        return micros;
+    }
+
+
+    static std::vector<SchedPlan> interleave(int ndevs, int nmicros) {
+        /**
+         * @brief interleave premise
+         *
+         * f f   f         b   b b
+         * f   f f         b b   b
+         * f     f f     b b     b
+         * f     f   f b   b     b
+         * 
+         */
+        std::vector<SchedPlan> micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs);
+            std::vector<Block*> blocks(ndevs*2, nullptr);
+            std::vector<std::vector<int>> devs(ndevs*2);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs[devid] = std::vector<int>({devid});
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs[2*ndevs-1-devid] = std::vector<int>({devid});
+            }
+            //
+            std::vector<int> blk_dev(ndevs, -1);
+            for (int idx = 0; idx < ndevs; ++idx) {
+                blk_dev[idx] = idx;
+            }
+            Block* fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
+            Block* bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
+            blocks.insert(blocks.begin(), fblock_full);
+            devs.insert(devs.begin(), blk_dev);
+            blocks.insert(blocks.end(), bblock_full);
+            devs.insert(devs.end(), blk_dev);
+            //
+            fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
+            bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
+            blocks.insert(blocks.begin()+1+ndevs/2, fblock_full);
+            devs.insert(devs.begin()+1+ndevs/2, blk_dev);
+            blocks.insert(blocks.begin()+2+ndevs*2-ndevs/2, bblock_full);
+            devs.insert(devs.begin()+2+ndevs*2-ndevs/2, blk_dev);
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
+            micros.push_back(micro);
+            std::cout << micro << std::endl;
+        }
+        return micros;
+    }
+
+};
 
 
 void expected_filters(std::vector<SchedPlan>& scheds) {
@@ -327,13 +338,13 @@ int main(int argc, const char* argv[]) {
 
     std::unordered_map<std::string, std::function<PremiseFunc> > premises;
     premises.emplace(
-        std::string("vshape"), std::function<PremiseFunc>(premise_vshape)
+        std::string("vshape"), std::function<PremiseFunc>(Premise::vshape)
     );
     premises.emplace(
-        std::string("chimera"), std::function<PremiseFunc>(premise_chimera)
+        std::string("chimera"), std::function<PremiseFunc>(Premise::chimera)
     );
     premises.emplace(
-        std::string("interleave"), std::function<PremiseFunc>(premise_interleave)
+        std::string("interleave"), std::function<PremiseFunc>(Premise::interleave)
     );
 
     CmdParser parser;
