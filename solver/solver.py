@@ -6,6 +6,7 @@ python solver.py --premise vshape --nmicros 4 --ndevs 4 --memory 4
 
 from typing import List, Optional, Set, Dict
 from enum import Enum
+import sys
 import time
 import argparse
 
@@ -141,14 +142,17 @@ class SchedulePlan:
             self._solver.add(self._nsteps == try_step)
             if self._solver.check() == z3.sat:
                 print(f'find sched plan of {try_step} steps')
+                sys.stdout.flush()
                 self._solution = self._solver.model()
                 opt_upper_step = try_step
                 opt_step = try_step
             else:
                 print(f'fail to find sched plan of {try_step} steps')
+                sys.stdout.flush()
                 opt_lower_step = try_step + 1
             self._solver.pop()
         print(f'find step optimal sched plan {opt_step}')
+        sys.stdout.flush()
         return opt_step
 
     def iter_step_optimal_plan(self):
@@ -171,6 +175,7 @@ class SchedulePlan:
         dscp = ''
         nsteps = max(start + blk.span for blk, start in solution.items())
         for devid in range(self.ndevs):
+            step = 0
             while step < nsteps:
                 have_block = False
                 for blk, start in solution.items():
@@ -286,6 +291,10 @@ if __name__ == '__main__':
     parser.add_argument('--memory', type=int,
                         help='memory limits')
     args = parser.parse_args()
+
+    print('============== Scheduling Solver ================')
+    print(args)
+    sys.stdout.flush()
 
     premise = getattr(Premise, args.premise)
     sched = premise(args.ndevs, args.nmicros)
