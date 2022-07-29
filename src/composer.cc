@@ -10,6 +10,13 @@
 
 #include <composer.h>
 
+template<typename T>
+void _debug_print(const T& blocks) {
+    for (Block* blk : blocks) {
+        std::cout << *blk << " ";
+    }
+}
+
 
 Block2Hash::Block2Hash(const std::vector<SchedPlan>& plans) {
 
@@ -255,23 +262,18 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
     std::vector<Plans> next;
     std::vector<SchedPlan> schedules;
 
-    Conflict step_conflict = Composer::getStepConflict(
-        micros, step, blk2hash
-    );
-    // std::cout << "step conflict: " << step_conflict << std::endl;
-    Conflict mem_conflict = Composer::getMemConflict(
-        micros, step, memory, blk2hash
-    );
-    // std::cout << "memory conflict: " << mem_conflict << std::endl;
-
+    auto conflicts = Composer::getConflict(micros, step, memory, blk2hash);
+    Conflict can_keep = conflicts.first;
+    Conflict to_shift = conflicts.second;
+    // std::cout << "keepable conflict: " << can_keep << " | must move conflict: " << to_shift << std::endl;
     std::vector< std::set<Block*> > all_shifts = Composer::getShiftSpace(
-        ndevs, micros, step_conflict, mem_conflict, blk2hash, blk2idx
+        ndevs, micros, can_keep, to_shift, blk2idx
     );
 
     // std::cout << "prev:\n"; for (auto& micro : micros) std::cout << micro << std::endl;
     // std::cout << "memory constraints: "; for (float mem : memory) std::cout << mem << " "; std::cout << std::endl;
     // for (auto shifts : all_shifts) {std::cout << "shift(" << all_shifts.size() << "): "; for (auto blk : shifts) printf("%s(%d) ", blk->toStr().c_str(), blk->mid); std::cout << std::endl; }
-    // { if (micros.size() == 2) { int _x; std::cin >> _x; } }
+    // { if (true) { int _x; std::cin >> _x; } }
 
     for (auto& shifts : all_shifts) {
 
@@ -281,6 +283,12 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
             int idx = blk2idx[blk];
             cmicros[idx].shift(blk);
         }
+
+        // dynamic pruning
+        if (Composer::isDynSymm(cmicros, step)) {
+            continue;
+        }
+
         // std::cout << "prev:\n"; for (auto& micro : cmicros) std::cout << micro << std::endl;
         if (SchedPlan::stackable(cmicros, memory)) {
             SchedPlan sched = SchedPlan::stack(cmicros);
@@ -310,62 +318,9 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
 
 
 std::vector<std::set<Block*>>
-Composer::getShiftSpace(const int ndevice,
-                        const Plans& micros,
-                        const Conflict& step_conflict,
-                        const Conflict& mem_conflict,
-                        const Block2Hash& blk2hash,
-                        const Block2Idx& blk2idx) {
-
-    // set up candidates by pruning out same blocks
-    std::unordered_map<int, Block*> keep_uids;
-    for (auto cblock : step_conflict.allBlocks()) {
-        if (mem_conflict.haveBlock(cblock)) continue;
-        int uid = blk2hash.getUid(cblock);
-        if (keep_uids.find(uid) != keep_uids.end()) {
-            if (keep_uids[uid]->mid > cblock->mid) {
-                keep_uids[uid] = cblock;
-            }
-        }
-        else {
-            keep_uids.emplace(uid, cblock);
-        }
-    }
-    std::set<Block*> keep_candidates;
-    std::set<int> lock_devices;
-    for (auto& it : keep_uids) {
-        Block* blk = it.second;
-        int mid = blk2idx.at(blk);
-        if (!micros[mid].isTheStart(blk, step_conflict.step)) {
-            keep_candidates.insert(blk);
-            for (int devid : step_conflict.getDevice(blk)) {
-                if (lock_devices.find(devid) != lock_devices.end()) {
-                    std::cerr << "================= Error =================" << std::endl;
-                    std::cerr << "micros:\n";
-                    for (auto& micro : micros) std::cerr << micro << std::endl;
-                    std::cerr << "Error block: " << *blk << " Resolving step: " << step_conflict.step << std::endl;
-                    std::cerr << "================= Error =================" << std::endl;
-                    throw std::runtime_error("Line 328: find two blocks get conflicted.\n");
-                }
-                lock_devices.insert(devid);
-            }
-        }
-    }
-    for (auto& it : keep_uids) {
-        Block* blk = it.second;
-        bool can_be_candidate = true;
-        for (int devid : step_conflict.getDevice(blk)) {
-            if (lock_devices.find(devid) != lock_devices.end()) {
-                can_be_candidate = false;
-                break;
-            }
-        }
-        int mid = blk2idx.at(blk);
-        if (micros[mid].isTheStart(blk, step_conflict.step) and can_be_candidate) {
-            keep_candidates.insert(blk);
-        }
-    }
-    // printf("candidates: "); for (Block* blk : keep_candidates) { printf("%s(%d) ", blk->toStr().c_str(), blk->mid); } std::cout << std::endl;
+Composer::getShiftSpace(const int ndevice, const Plans& micros,
+                const Conflict& can_keep, const Conflict& to_shift,
+                const Block2Idx& blk2idx) {
 
     std::vector<std::set<Block*>> all_keeps;
     using Item = std::pair<std::set<Block*>, std::vector<bool>>;
@@ -374,164 +329,68 @@ Composer::getShiftSpace(const int ndevice,
     curr.emplace_back(std::set<Block*>(), std::vector<bool>(ndevice, false));
 
     while (!curr.empty()) {
-        // std::cout << "next =====" << std::endl;
         for (auto& item : curr) {
-            bool no_more_add = true;
-            for (Block* blk : keep_candidates) {
-                // std::cout << "here1 " << *blk << std::endl;
-                if (item.first.find(blk) == item.first.end()) {
-                    bool can_insert = true;
-                    for (int devid : step_conflict.getDevice(blk)) {
-                        if (item.second[devid]) {
-                            can_insert = false;
-                            break;
-                        }
+            bool full = true;
+            for (Block* blk : can_keep.allBlocks()) {
+                bool keepable = true;
+                for (int devid : can_keep.getDevice(blk)) {
+                    if (item.second[devid]) {
+                        keepable = false;
+                        break;
                     }
-                    //std::cout << "can insert: " << can_insert << std::endl;
-                    if (can_insert) {
-                        std::set<Block*> blks(item.first);
-                        std::vector<bool> devs(item.second);
-                        blks.insert(blk);
-                        for (int devid : step_conflict.getDevice(blk)) {
-                            devs[devid] = true;
-                        }
-                        next.emplace_back(blks, devs);
-                        no_more_add = false;
+                }
+                if (keepable) {
+                    std::set<Block*> blks(item.first);
+                    std::vector<bool> devs(item.second);
+                    blks.insert(blk);
+                    for (int devid : can_keep.getDevice(blk)) {
+                        devs[devid] = true;
                     }
+                    next.emplace_back(blks, devs);
+                    full = false;
                 }
             }
-            if (no_more_add) {
-                // check redundant
-                // printf("adding all_keeps: "); for (auto blk : item.first) { printf("%s ", blk->toStr().c_str()); } printf("\n");
-                bool exist = false;
-                for (auto& keep : all_keeps) {
-                    bool same = true;
-                    for (auto& blk : item.first) {
-                        if (keep.find(blk) == keep.end()) {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (same) {
-                            exist = true;
-                            break;
-                        }
-                }
-                if (!exist) {
-                    // dynamic symmetric pruning technique
-                    bool discard = false;
-                    // we only consider block at step-1, if no block in step-1, this indicates
-                    // there are blocks in kblock.before happen at step-1,
-                    // otherwise kblock can be put on step-1.
-                    for (auto& kblk : item.first) {
-                        //printf("start\n");
-                        std::set<Block*> exblks;
-                        bool exchangable = true;
-                        int micro_idx = blk2idx.at(kblk);
-                        //printf("here1: micro_idx: %d\n", micro_idx);
-                        int step = micros[micro_idx].getStep(kblk);
-                        if (step == 0) break;
-                        // before block 
-                        for (auto& bblk : kblk->before) {
-                            if (micros[micro_idx].haveBlock(bblk) && micros[micro_idx].getStep(bblk) == step-1) {
-                                exchangable = false;
-                                break;
-                            }
-                        }
-                        //printf("here2\n");
-                        if (!exchangable) continue;
-                        // after block
-                        for (int devid : micros[micro_idx].getDevice(kblk)) {
-                            for (auto& micro : micros) {
-                                Block* exblk = micro.getBlock(devid, step-1);
-                                if (exblk == nullptr) continue;
-                                exblks.insert(exblk);
-                                // exchange will not change peak memory
-                                if (exblk->memory * kblk->memory < 0) {
-                                    exchangable = false;
-                                    break;
-                                }
-                                // exchange will not break dependency 
-                                for (auto& ablk : exblk->after) {
-                                    if (micro.haveBlock(ablk) and micro.getStep(ablk) == step and item.first.find(ablk) != item.first.end()) {
-                                        exchangable = false;
-                                        break;
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                        //printf("here3\n");
-                        if (exchangable) {
-                            for (auto& exblk : exblks) {
-                                if (exblk->mid > kblk->mid) {
-                                    discard = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (!discard) {
-                        // printf("....success!\n");
-                        all_keeps.push_back(item.first);
-                    }
+            if (not full) continue;
+            // add to keep candidates: check redundancy
+            bool exist = false;
+            for (auto& keep : all_keeps) {
+                if (keep == item.first) {
+                    exist = true;
+                    break;
                 }
             }
+            if (exist) continue;
+            all_keeps.push_back(item.first);
         }
         curr.clear();
         std::swap(curr, next);
     }
 
-
-    // for (auto& keep : all_keeps) { printf("keeps: "); for (auto& blk : keep) {std::cout << *blk << " ";} std::cout << std::endl; } 
-
-    std::vector<std::set<Block*> > all_shifts;
-    std::set<Block*> all_blks;
-    auto step_cblks = step_conflict.allBlocks();
-    auto mem_cblks = mem_conflict.allBlocks();
-    all_blks.insert(step_cblks.begin(), step_cblks.end());
-    all_blks.insert(mem_cblks.begin(), mem_cblks.end());
+    // std::cout << "all keeps:" << std::endl; for (auto keep : all_keeps) { _debug_print<std::set<Block*>>(keep); std::cout << std::endl;}
+    std::vector<std::set<Block*>> all_shifts;
+    std::vector<Block*> must_shift_blks = to_shift.allBlocks();
     for (auto& keep : all_keeps) {
-        std::set<Block*> shifts;
-        std::set_difference(
-            all_blks.begin(), all_blks.end(),
-            keep.begin(), keep.end(),
-            std::inserter(shifts, shifts.begin())
-        );
+        std::set<Block*> shifts(must_shift_blks.begin(), must_shift_blks.end());
+        for (Block* blk : can_keep.allBlocks()) {
+            if (keep.find(blk) == keep.end()) {
+                shifts.insert(blk);
+            }
+        }
         all_shifts.push_back(shifts);
     }
     return all_shifts;
 }
 
 
-Conflict Composer::getStepConflict(const std::vector<SchedPlan>& micros, int step,
-                                   const Block2Hash& blk2hash) {
+std::pair<Conflict, Conflict>
+Composer::getConflict(const Plans& micros, int step,
+                      const std::vector<float>& memory,
+                      const Block2Hash& blk2hash) {
     const int ndevs = micros.at(0).nDevs();
-    Conflict conflict(ndevs, step);
-    for (int devid = 0; devid < ndevs; ++devid) {
-        std::vector<Block*> blks;
-        for (auto& micro : micros) {
-            auto blk = micro.getBlock(devid, step);
-            if (blk != nullptr) {
-                blks.push_back(blk);
-            }
-        }
-        if (blks.size() > 1) {
-            for (auto blk : blks) {
-                conflict.addBlock(blk, devid);
-            }
-        }
-    }
-    return conflict;
-}
+    Conflict can_keep(ndevs, step);
+    Conflict to_shift(ndevs, step);
 
-
-Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step,
-                                  const std::vector<float>& memory, const Block2Hash& blk2hash) {
-    const int ndevs = micros.at(0).nDevs();
-    Conflict conflict(ndevs, step);
-
+    // ===============  must shift: memory conflict ================
     std::vector<float> devmem(ndevs, 0.0);
     for (int devid = 0; devid < ndevs; ++devid) {
         for (auto& micro : micros) {
@@ -582,11 +441,129 @@ Conflict Composer::getMemConflict(const std::vector<SchedPlan>& micros, int step
 
             if (need_shift) {
                 for (auto devid : devs) {
-                    conflict.addBlock(blk, devid);
+                    to_shift.addBlock(blk, devid);
                 }
             }
         }
     }
 
-    return conflict;
+    // ===============  can keep: step conflict ================
+    for (int devid = 0; devid < ndevs; ++devid) {
+        std::unordered_map<int, Block*> keep_uids;
+        std::unordered_map<Block*, std::vector<int>> blk_devs;
+
+        int blk_cnt = 0;
+        for (auto& micro : micros) {
+            Block* blk = micro.getBlock(devid, step);
+            if (blk != nullptr) {
+                if (!to_shift.haveBlock(blk)) {
+                    blk_cnt += 1;
+                }
+            }
+        }
+        if (blk_cnt <= 1) continue;
+        // if the block at this step starts before, all other blocks
+        // need to be shifted.
+        bool to_shift_start = false;
+        for (auto& micro : micros) {
+            auto blk = micro.getBlock(devid, step);
+            if (blk == nullptr) continue;
+            if (!micro.isTheStart(blk, step)) {
+                to_shift_start = true;
+                break;
+            }
+        }
+        for (auto& micro : micros) {
+            auto blk = micro.getBlock(devid, step);
+            if (blk == nullptr) continue;
+            if (to_shift.haveBlock(blk) or !micro.isTheStart(blk, step)) continue;
+            blk_devs.emplace(blk, micro.getDevice(blk));
+            if (to_shift_start) {
+                to_shift.addBlock(blk, blk_devs[blk]);
+            }
+            // static symmetry
+            else {
+                int uid = blk2hash.getUid(blk);
+                if (keep_uids.find(uid) != keep_uids.end()) {
+                    Block* kept = keep_uids[uid];
+                    if (blk->mid < kept->mid) {
+                        to_shift.addBlock(kept, blk_devs[kept]);
+                        keep_uids[uid] = blk;
+                    }
+                    else {
+                        to_shift.addBlock(blk, blk_devs[blk]);
+                    }
+                }
+                else {
+                    keep_uids.emplace(uid, blk);
+                }
+            }
+        }
+        for (auto& it : keep_uids) {
+            can_keep.addBlock(it.second, blk_devs[it.second]);
+        }
+    }
+    return std::make_pair(can_keep, to_shift);
+}
+
+
+bool Composer::isDynSymm(const Plans& micros, int step) {
+    const int ndevs = micros.at(0).nDevs();
+    // TODO: change implementation to block granularity.
+    if (step == 0) return false;
+    std::set<Block*> curr;
+    std::vector<int> curr_mem(ndevs);
+    for (auto& micro : micros) {
+        for (auto blk : micro.stepBlocks(step)) {
+            if (!micro.isTheStart(blk, step)) return false;
+            curr.insert(blk);
+            for (int devid : micro.getDevice(blk)) {
+                curr_mem[devid] = blk->memory;
+            }
+        }
+    }
+    std::set<Block*> prev;
+    std::vector<int> prev_mem(ndevs);
+    for (auto& micro : micros) {
+        for (auto blk : micro.stepBlocks(step-1)) {
+            if (!micro.isTheStart(blk, step-1)) return false;
+            prev.insert(blk);
+            for (int devid : micro.getDevice(blk)) {
+                prev_mem[devid] = blk->memory;
+            }
+        }
+    }
+    // check before
+    for (Block* blk : curr) {
+        for (Block* bblk : blk->before) {
+            if (prev.find(bblk) != prev.end()) {
+                return false;
+            }
+        }
+    }
+    // check after
+    for (Block* blk : prev) {
+        for (Block* ablk : blk->after) {
+            if (curr.find(ablk) != curr.end()) {
+                return false;
+            }
+        }
+    }
+    int prev_mid = std::numeric_limits<int>::max();
+    int curr_mid = std::numeric_limits<int>::max();
+    for (auto blk : prev) {
+        prev_mid = std::min(prev_mid, blk->mid);
+    }
+    for (auto blk : curr) {
+        curr_mid = std::min(curr_mid, blk->mid);
+    }
+    if (prev_mid > curr_mid) {
+        for (int devid = 0; devid < ndevs; ++devid) {
+            if (prev_mem[devid] < 0 and curr_mem[devid] > 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
 }

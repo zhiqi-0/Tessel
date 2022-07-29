@@ -62,6 +62,13 @@ class Conflict {
         this->block2device[blk].push_back(devid);
     }
 
+    void addBlock(Block* blk, std::vector<int> devs) {
+        for (int devid : devs) {
+            device2blocks.at(devid).insert(blk);
+        }
+        block2device.emplace(blk, devs);
+    }
+
     inline std::vector<int> getDevice(Block* blk) const { return this->block2device.find(blk)->second; }
     
     inline bool haveBlock(Block* blk) const { return this->block2device.find(blk) != this->block2device.end(); }
@@ -117,15 +124,15 @@ class Composer {
                 const Block2Hash& blk2hash, Block2Idx& blk2idx);
 
     static std::vector<std::set<Block*>>
-    getShiftSpace(const int ndevice,
-                  const Plans& micros,
-                  const Conflict& step_conflict, const Conflict& mem_conflict,
-                  const Block2Hash& blk2hash, const Block2Idx& blk2idx);
+    getShiftSpace(const int ndevice, const Plans& micros,
+                    const Conflict& can_keep, const Conflict& to_shift,
+                    const Block2Idx& blk2idx);
 
-    static Conflict getStepConflict(const std::vector<SchedPlan>& micros, int step,
-                                    const Block2Hash& blk2hash);
+    static std::pair<Conflict, Conflict>
+    getConflict(const Plans& micros, int step,
+                const std::vector<float>& memory,
+                const Block2Hash& blk2hash);
 
-    static Conflict getMemConflict(const std::vector<SchedPlan>& micros, int step,
-                                   const std::vector<float>& memory, const Block2Hash& blk2hash);
+    static bool isDynSymm(const Plans& micros, int step);
 
 };
