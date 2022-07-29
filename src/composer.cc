@@ -252,6 +252,74 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
 }
 
 
+Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
+                               bool silence, int opt_step_upbound, int nworkers) {
+    int ndevs = micros.at(0).nDevs();
+    
+    // construct block mapping to micro index
+    Block2Idx blk2idx;
+    for (std::size_t i = 0; i < micros.size(); ++i) {
+        for (auto blk : micros[i].allBlocks()) {
+            blk2idx.emplace(blk, int(i));
+        }
+    }
+
+    std::size_t total_status = 1;
+    Block2Hash blk2hash(micros);
+
+    using Item = std::pair<int, std::vector<Plans>>;
+    std::vector<Item> stack;
+    Plans schedules;
+
+    int opt_step = 0;
+    for (auto& micro : micros) {
+        opt_step += micro.nSteps();
+    }
+    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
+
+    stack.emplace_back(0, std::vector<Plans>(1, micros));
+    while (!stack.empty()) {
+        Item& item = stack.back();
+        int step = item.first;
+        Plans micros = item.second.back();
+
+        // conflict resolve
+        auto plans_scheds = Composer::resolveStep(
+            micros, memory, step, opt_step, blk2hash, blk2idx);
+
+        item.second.pop_back();
+        if (item.second.empty()) {
+            stack.pop_back();
+        }
+        if (plans_scheds.first.size() > 0) {
+            stack.emplace_back(step+1, plans_scheds.first);
+        }
+
+        for (auto& sched : plans_scheds.second) {
+            if (sched.nSteps() < opt_step) {
+                if (!silence) std::cout << "\r ==========> find fewer steps " << sched.nSteps() << std::endl;
+                opt_step = sched.nSteps();
+                schedules.clear();
+            }
+            if (sched.nSteps() == opt_step) {
+                schedules.push_back(sched);
+            }
+        }
+        total_status += 1;
+        if (total_status % 1000 == 0) {
+            if (!silence) std::cout << "\rsearched " << total_status << "/? cases" << std::flush;
+        }
+    }
+
+    if (!silence) {
+        std::cout << "search done on " << total_status << " cases. "
+                  << "find " << schedules.size() << " tight step-optimal plans "
+                  << "(step = " << opt_step << ")" << std::endl;
+    }
+    return schedules;
+}
+
+
 std::pair<std::vector<Plans>, std::vector<SchedPlan>>
 Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
                       int step, int upper_opt_step,
