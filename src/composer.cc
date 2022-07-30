@@ -91,7 +91,7 @@ bool Block2Hash::samePlan(const SchedPlan& sched1, const SchedPlan sched2) {
 
 // ******************* Composer *******************
 
-Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
+Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<float>& memory,
                             bool silence, int opt_step_upbound, int nworkers) {
 
     // construct block mapping to micro index
@@ -352,7 +352,7 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence, int opt_step_upbound, int nworkers) {
     int ndevs = micros.at(0).nDevs();
     // upbound to handle
-    const std::size_t breadth = 1;
+    const std::size_t breadth = nworkers * 128;
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;
     
@@ -393,50 +393,79 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
         }
 
         std::vector<Plans> candidates;
-        for (std::size_t idx = 0; idx < plans.size(); ++idx) {
-            Plans& micros = plans.at(idx);
-            // encode problem
-            std::vector<int> msteps;
-            msteps.reserve(micros.size() + ndevs);
-            for (std::size_t mid = 0; mid < plans[idx].size(); ++mid) {
-                msteps.push_back(micros[mid].nSteps() - step);
-            }
-            for (int devid = 0; devid < ndevs; ++devid) {
-                msteps.push_back(Composer::currMemory(micros, devid, 0, step));
-            }
-            std::string prob = encode(msteps);
 
-            // check if the problem is explored
-            if (explored.find(prob) != explored.end() and step < explored[prob]) {
-                continue;
-            }
-            explored.insert_or_assign(prob, step);
+        #pragma omp parallel num_threads(nworkers)
+        {
+            int tid = omp_get_thread_num();
+            int start = plans.size() / nworkers * tid;
+            int stop = (tid == nworkers - 1) ? int(plans.size()) : start + plans.size() / nworkers;
 
-            auto plans_scheds = Composer::resolveStep(
-                micros, memory, step, opt_step, blk2hash, blk2idx
-            );
-
-            if (plans_scheds.first.size() > 0) {
-                candidates.insert(candidates.end(),
-                plans_scheds.first.begin(), plans_scheds.first.end());
-            }
-
-            for (auto& sched : plans_scheds.second) {
-                if (sched.nSteps() < opt_step) {
-                    if (!silence) std::cout << "\r ==========> find fewer steps " << sched.nSteps() << std::endl;
-                    opt_step = sched.nSteps();
-                    schedules.clear();
+            // encode the problem
+            std::vector<std::string> probs(stop-start);
+            for (int idx = 0; idx < stop-start; ++idx) {
+                Plans& micros = plans.at(idx);
+                std::vector<int> msteps;
+                msteps.reserve(micros.size() + ndevs);
+                for (std::size_t mid = 0; mid < plans[idx].size(); ++mid) {
+                    msteps.push_back(micros[mid].nSteps() - step);
                 }
-                if (sched.nSteps() == opt_step) {
-                    schedules.push_back(sched);
+                for (int devid = 0; devid < ndevs; ++devid) {
+                    msteps.push_back(Composer::currMemory(micros, devid, 0, step));
+                }
+                probs[idx] = encode(msteps);
+            }
+
+            // prune the same problem
+            std::vector<bool> prunes(stop-start, false);
+            #pragma omp critical
+            {
+                for (int idx = 0; idx < stop-start; ++idx) {
+                    if (explored.find(probs[idx]) != explored.end() and step < explored[probs[idx]]) {
+                        prunes[idx] = true;
+                    }
+                    else {
+                        explored.insert_or_assign(probs[idx], step);
+                    }
                 }
             }
 
-            total_status += 1;
-            if (total_status % 1000 == 0) {
-                if (!silence) std::cout << "\rsearched " << total_status << "/? cases" << std::flush;
+            for (int idx = start; idx < stop; ++idx) {
+                
+                if (prunes[idx-start]) continue;
+ 
+                Plans& micros = plans.at(idx);
+                auto plans_scheds = Composer::resolveStep(
+                    micros, memory, step, opt_step, blk2hash, blk2idx
+                );
+
+                #pragma omp critical
+                {
+                    if (plans_scheds.first.size() > 0) {
+                        candidates.insert(
+                            candidates.end(),
+                            plans_scheds.first.begin(), plans_scheds.first.end()
+                        );
+                    }
+
+                    for (auto& sched : plans_scheds.second) {
+                        if (sched.nSteps() < opt_step) {
+                            if (!silence) std::cout << "\r ==========> find fewer steps " << sched.nSteps() << std::endl;
+                            opt_step = sched.nSteps();
+                            schedules.clear();
+                        }
+                        if (sched.nSteps() == opt_step) {
+                            schedules.push_back(sched);
+                        }
+                    }
+
+                    total_status += 1;
+                    if (total_status % 1000 == 0) {
+                        if (!silence) std::cout << "\rsearched " << total_status << "/? cases" << std::flush;
+                    }
+                }
             }
         }
+
         if (candidates.size() > 0) {
             stack.emplace_back(step+1, candidates);
         }

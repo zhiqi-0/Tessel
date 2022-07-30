@@ -110,14 +110,21 @@ class Composer {
 
  public:
 
-    static Plans stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
+    /**
+     * @brief parallel BFS impelmentation for search step optimal plan
+     */
+    static Plans stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<float>& memory,
                              bool silence = false, int opt_step_upbound = -1,
                              int nworkers = 1);
-
+    /**
+     * @brief single-thread DFS impelmentation for search step optimal plan
+     */
     static Plans stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence = false, int opt_step_upbound = -1,
                                 int nworkers = 1);
-
+    /**
+     * @brief parallel BFS-DFS impelmentation for search step optimal plan
+     */
     static Plans stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
                                  bool silence = false, int opt_step_upbound = -1,
                                  int nworkers = 1);

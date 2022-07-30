@@ -130,7 +130,7 @@ class Premise {
             for (int devid = 0; devid < ndevs; ++devid) {
                 blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
                 devs[devid] = std::vector<int>({devid});
-                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 1);
                 devs[2*ndevs-1-devid] = std::vector<int>({devid});
             }
             //
@@ -139,14 +139,14 @@ class Premise {
                 blk_dev[idx] = idx;
             }
             Block* fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
-            Block* bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
+            Block* bblock_full = new Block(mid, BlockType::Backward, 1.0, 1);
             blocks.insert(blocks.begin(), fblock_full);
             devs.insert(devs.begin(), blk_dev);
             blocks.insert(blocks.end(), bblock_full);
             devs.insert(devs.end(), blk_dev);
             //
             fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
-            bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
+            bblock_full = new Block(mid, BlockType::Backward, 1.0, 1);
             blocks.insert(blocks.begin()+1+ndevs/2, fblock_full);
             devs.insert(devs.begin()+1+ndevs/2, blk_dev);
             blocks.insert(blocks.begin()+2+ndevs*2-ndevs/2, bblock_full);
@@ -178,8 +178,11 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
 
     // step optimal search
     timer.start();
-    std::vector<SchedPlan> opt_plans = Composer::stepOptimal(
-        micros, memory, true, false, -1, nworkers
+    // std::vector<SchedPlan> opt_plans = Composer::stepOptimal(
+    //     micros, memory, true, false, -1, nworkers
+    // );
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimalBFS(
+        micros, memory, false, -1, nworkers
     );
     timer.stop();
     std::cout << "step-optimal search time: "
