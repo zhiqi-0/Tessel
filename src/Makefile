@@ -1,7 +1,8 @@
 
 CXX = g++
 
-CXXFLAGS = -O2 -std=c++11 -fPIC -Wall -fopenmp
+# -std=c++17 for g++ version >= 8
+CXXFLAGS = -O2 -std=c++1z -fPIC -Wall -fopenmp
 CPPFLAGS = -I./include/
 LIBS = -lstdc++ -lpthread
 

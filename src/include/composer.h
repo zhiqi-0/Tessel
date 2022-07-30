@@ -111,12 +111,16 @@ class Composer {
  public:
 
     static Plans stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
-                             bool prune_symm = true, bool silence = false, int opt_step_upbound = -1,
+                             bool silence = false, int opt_step_upbound = -1,
                              int nworkers = 1);
 
     static Plans stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence = false, int opt_step_upbound = -1,
                                 int nworkers = 1);
+
+    static Plans stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
+                                 bool silence = false, int opt_step_upbound = -1,
+                                 int nworkers = 1);
 
     static std::pair<std::vector<Plans>, std::vector<SchedPlan>>
     resolveStep(const Plans& micros, const std::vector<float>& memory,
@@ -134,5 +138,7 @@ class Composer {
                 const Block2Hash& blk2hash);
 
     static bool isDynSymm(const Plans& micros, int step);
+
+    static float currMemory(const Plans& micros, int devid, int from_step, int to_step);
 
 };

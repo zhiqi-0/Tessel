@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <limits>
 #include <cstdio>
+#include <sstream>
+#include <unordered_set>
 
 #include <omp.h>
 
@@ -15,6 +17,14 @@ void _debug_print(const T& blocks) {
     for (Block* blk : blocks) {
         std::cout << *blk << " ";
     }
+}
+
+std::string encode(const std::vector<int>& steps) {
+    std::stringstream ss;
+    for (auto it = steps.begin(); it != steps.end(); ++it) {
+        ss << *it;
+    }
+    return ss.str();
 }
 
 
@@ -82,9 +92,8 @@ bool Block2Hash::samePlan(const SchedPlan& sched1, const SchedPlan sched2) {
 // ******************* Composer *******************
 
 Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<float>& memory,
-                            bool prune_symm, bool silence, int opt_step_upbound, int nworkers) {
+                            bool silence, int opt_step_upbound, int nworkers) {
 
-    
     // construct block mapping to micro index
     Block2Idx blk2idx;
     for (std::size_t i = 0; i < micros.size(); ++i) {
@@ -255,6 +264,9 @@ Plans Composer::stepOptimal(std::vector<SchedPlan> micros, const std::vector<flo
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                bool silence, int opt_step_upbound, int nworkers) {
     int ndevs = micros.at(0).nDevs();
+
+    // remain_step_hash : current step
+    std::unordered_map<std::string, int> explored;
     
     // construct block mapping to micro index
     Block2Idx blk2idx;
@@ -283,14 +295,30 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         int step = item.first;
         Plans micros = item.second.back();
 
-        // conflict resolve
-        auto plans_scheds = Composer::resolveStep(
-            micros, memory, step, opt_step, blk2hash, blk2idx);
+        // encode the rest problem as a searched problem
+        std::vector<int> msteps;
+        msteps.reserve(micros.size() + ndevs);
+        for (std::size_t idx = 0; idx < micros.size(); ++idx) {
+            msteps.push_back(micros[idx].nSteps() - step);
+        }
+        for (int devid = 0; devid < ndevs; ++devid) {
+            msteps.push_back(Composer::currMemory(micros, devid, 0, step));
+        }
+        std::string prob = encode(msteps);
 
         item.second.pop_back();
         if (item.second.empty()) {
             stack.pop_back();
         }
+
+        if (explored.find(prob) != explored.end() and step < explored[prob]) {
+            continue;
+        }
+        explored.insert_or_assign(prob, step);
+
+        auto plans_scheds = Composer::resolveStep(
+            micros, memory, step, opt_step, blk2hash, blk2idx);
+
         if (plans_scheds.first.size() > 0) {
             stack.emplace_back(step+1, plans_scheds.first);
         }
@@ -312,7 +340,110 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
     }
 
     if (!silence) {
-        std::cout << "search done on " << total_status << " cases. "
+        std::cout << "\nsearch done on " << total_status << " cases. "
+                  << "find " << schedules.size() << " tight step-optimal plans "
+                  << "(step = " << opt_step << ")" << std::endl;
+    }
+    return schedules;
+}
+
+
+Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
+                                bool silence, int opt_step_upbound, int nworkers) {
+    int ndevs = micros.at(0).nDevs();
+    // upbound to handle
+    const std::size_t breadth = 1;
+    // remain_step_hash : current step
+    std::unordered_map<std::string, int> explored;
+    
+    // construct block mapping to micro index
+    Block2Idx blk2idx;
+    for (std::size_t i = 0; i < micros.size(); ++i) {
+        for (auto blk : micros[i].allBlocks()) {
+            blk2idx.emplace(blk, int(i));
+        }
+    }
+
+    std::size_t total_status = 1;
+    Block2Hash blk2hash(micros);
+
+    using Item = std::pair<int, std::vector<Plans>>;
+    std::vector<Item> stack;
+    Plans schedules;
+
+    int opt_step = 0;
+    for (auto& micro : micros) {
+        opt_step += micro.nSteps();
+    }
+    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
+
+    stack.emplace_back(0, std::vector<Plans>(1, micros));
+    while (!stack.empty()) {
+        Item& item = stack.back();
+        int step = item.first;
+        int nplans = std::min(item.second.size(), breadth);
+
+        std::vector<Plans> plans;
+        plans.insert(plans.end(), item.second.end()-nplans, item.second.end());
+        
+        // pop out the stack
+        item.second.erase(item.second.end()-nplans, item.second.end());
+        if (item.second.empty()) {
+            stack.pop_back();
+        }
+
+        std::vector<Plans> candidates;
+        for (std::size_t idx = 0; idx < plans.size(); ++idx) {
+            Plans& micros = plans.at(idx);
+            // encode problem
+            std::vector<int> msteps;
+            msteps.reserve(micros.size() + ndevs);
+            for (std::size_t mid = 0; mid < plans[idx].size(); ++mid) {
+                msteps.push_back(micros[mid].nSteps() - step);
+            }
+            for (int devid = 0; devid < ndevs; ++devid) {
+                msteps.push_back(Composer::currMemory(micros, devid, 0, step));
+            }
+            std::string prob = encode(msteps);
+
+            // check if the problem is explored
+            if (explored.find(prob) != explored.end() and step < explored[prob]) {
+                continue;
+            }
+            explored.insert_or_assign(prob, step);
+
+            auto plans_scheds = Composer::resolveStep(
+                micros, memory, step, opt_step, blk2hash, blk2idx
+            );
+
+            if (plans_scheds.first.size() > 0) {
+                candidates.insert(candidates.end(),
+                plans_scheds.first.begin(), plans_scheds.first.end());
+            }
+
+            for (auto& sched : plans_scheds.second) {
+                if (sched.nSteps() < opt_step) {
+                    if (!silence) std::cout << "\r ==========> find fewer steps " << sched.nSteps() << std::endl;
+                    opt_step = sched.nSteps();
+                    schedules.clear();
+                }
+                if (sched.nSteps() == opt_step) {
+                    schedules.push_back(sched);
+                }
+            }
+
+            total_status += 1;
+            if (total_status % 1000 == 0) {
+                if (!silence) std::cout << "\rsearched " << total_status << "/? cases" << std::flush;
+            }
+        }
+        if (candidates.size() > 0) {
+            stack.emplace_back(step+1, candidates);
+        }
+    }
+
+    if (!silence) {
+        std::cout << "\nsearch done on " << total_status << " cases. "
                   << "find " << schedules.size() << " tight step-optimal plans "
                   << "(step = " << opt_step << ")" << std::endl;
     }
@@ -583,7 +714,8 @@ bool Composer::isDynSymm(const Plans& micros, int step) {
     std::vector<int> curr_mem(ndevs);
     for (auto& micro : micros) {
         for (auto blk : micro.stepBlocks(step)) {
-            if (!micro.isTheStart(blk, step)) return false;
+            // if (!micro.isTheStart(blk, step)) return false;
+            if (blk->span > 1) return false;
             curr.insert(blk);
             for (int devid : micro.getDevice(blk)) {
                 curr_mem[devid] = blk->memory;
@@ -634,4 +766,24 @@ bool Composer::isDynSymm(const Plans& micros, int step) {
         return true;
     }
     return false;
+}
+
+
+float Composer::currMemory(const Plans& micros, int devid, int from_step, int to_step) {
+    float curr_mem = 0.0;
+    Block* blk = nullptr;
+    int t = from_step;
+    while (t < to_step) {
+        for (auto& micro : micros) {
+            blk = micro.getBlock(devid, t);
+            if (blk == nullptr) {
+                t += 1;
+            }
+            else {
+                curr_mem += blk->memory;
+                t += blk->span;
+            }
+        }
+    }
+    return curr_mem;
 }

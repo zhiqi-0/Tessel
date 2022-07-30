@@ -32,7 +32,7 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(
         steady_memory[devid] = memory[devid] - curr_mem;
     }
     Plans steadies = Composer::stepOptimal(
-        tail_heads, steady_memory, true, true,
+        tail_heads, steady_memory, true,
         steady_opt_step_upbound, nworkers
     );
 
