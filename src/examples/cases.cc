@@ -111,6 +111,55 @@ class Premise {
         return micros;
     }
 
+    static std::vector<SchedPlan> twotower(int ndevs, int nmicros){
+        /**
+         * @brief two tower model.
+         * Replicated at last forward of each branch
+         * 
+         * f     f b     b
+         *   f f     b b
+         *   f f     b b
+         * f     f b     b
+         *
+         */
+        Plans micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs * 3);
+            std::vector<Block*> blocks_branch1(ndevs * 2, nullptr);
+            std::vector<int> devs_branch1(ndevs * 2, -1);
+            std::vector<Block*> blocks_branch2(ndevs * 2, nullptr);
+            std::vector<int> devs_branch2(ndevs * 2, -1);
+            for (int idx = 0; idx < ndevs; ++idx) {
+                blocks_branch1[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs_branch1[idx] = idx;
+                blocks_branch1[2*ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs_branch1[2*ndevs-1-idx] = idx;
+
+                blocks_branch2[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs_branch2[idx] = ndevs-1-idx;
+                blocks_branch2[2*ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs_branch2[2*ndevs-1-idx] = ndevs-1-idx;
+            }
+            micro.addBlockSeq(blocks_branch1, devs_branch1);
+            micro.addBlockSeq(blocks_branch2, devs_branch2);
+            Block::addDependencies(blocks_branch1);
+            Block::addDependencies(blocks_branch2);
+            Block::addDependency(
+                *(blocks_branch2.end()-ndevs-2), *(blocks_branch1.end()-ndevs-1)
+            );
+            Block::addDependency(
+                *(blocks_branch2.end()-ndevs+1), *(blocks_branch1.end()-ndevs+2)
+            );
+            Block::addDependency(
+                *(blocks_branch1.end()-ndevs-2), *(blocks_branch2.end()-ndevs-1)
+            );
+            Block::addDependency(
+                *(blocks_branch1.end()-ndevs+1), *(blocks_branch2.end()-ndevs+2)
+            );
+            micros.push_back(micro);
+        }
+        return micros;
+    }
 
     static std::vector<SchedPlan> interleave(int ndevs, int nmicros) {
         /**
@@ -255,6 +304,9 @@ int main(int argc, const char* argv[]) {
     );
     premises.emplace(
         std::string("interleave"), std::function<PremiseFunc>(Premise::interleave)
+    );
+    premises.emplace(
+        std::string("twotower"), std::function<PremiseFunc>(Premise::twotower)
     );
 
     CmdParser parser;
