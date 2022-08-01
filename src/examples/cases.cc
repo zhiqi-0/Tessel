@@ -67,7 +67,6 @@ class Premise {
         return micros;
     }
 
-
     static std::vector<SchedPlan> chimera(int ndevs, int nmicros) {
         /**
          * @brief chimera premise: bi-pipe
@@ -156,6 +155,35 @@ class Premise {
             Block::addDependency(
                 *(blocks_branch1.end()-ndevs+1), *(blocks_branch2.end()-ndevs+2)
             );
+            micros.push_back(micro);
+        }
+        return micros;
+    }
+
+    static std::vector<SchedPlan> alphafold(int ndevs, int nmicros) {
+        int repeat_forward = 3;
+        Plans micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs * (repeat_forward + 1));
+            std::vector<Block*> blocks(ndevs * (repeat_forward + 1), nullptr);
+            std::vector<int> devs(ndevs * (repeat_forward + 1), -1);
+            // add forward blocks
+            for (int rid = 0; rid < repeat_forward; ++rid) {
+                for (int idx = 0; idx < ndevs; ++idx) {
+                    int ofst = rid * ndevs;
+                    float memory = rid == repeat_forward - 1 ? 1.0 : 0.0;
+                    blocks[ofst + idx] = new Block(mid, BlockType::Forward, memory, 1);
+                    devs[ofst + idx] = idx;
+                }
+            }
+            // add backward blocks
+            int ofst = repeat_forward * ndevs;
+            for (int idx = 0; idx < ndevs; ++idx) {
+                blocks[ofst + idx] = new Block(mid, BlockType::Backward, 1.0, 1);
+                devs[ofst + idx] = ndevs - 1- idx;
+            }
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
             micros.push_back(micro);
         }
         return micros;
@@ -307,6 +335,9 @@ int main(int argc, const char* argv[]) {
     );
     premises.emplace(
         std::string("twotower"), std::function<PremiseFunc>(Premise::twotower)
+    );
+    premises.emplace(
+        std::string("alphafold"), std::function<PremiseFunc>(Premise::alphafold)
     );
 
     CmdParser parser;

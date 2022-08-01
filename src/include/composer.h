@@ -129,10 +129,13 @@ class Composer {
                                  bool silence = false, int opt_step_upbound = -1,
                                  int nworkers = 1);
 
+    /**
+     * @brief resolve the conflict at step on micros. rstep: the upper bound step.
+     */
     static std::pair<std::vector<Plans>, std::vector<SchedPlan>>
     resolveStep(const Plans& micros, const std::vector<float>& memory,
-                int step, int upper_opt_step,
-                const Block2Hash& blk2hash, Block2Idx& blk2idx);
+                int step, const Block2Hash& blk2hash, Block2Idx& blk2idx,
+                int rstep, const std::vector<int>& minsteps);
 
     static std::vector<std::set<Block*>>
     getShiftSpace(const int ndevice, const Plans& micros,
@@ -148,4 +151,5 @@ class Composer {
 
     static float currMemory(const Plans& micros, int devid, int from_step, int to_step);
 
+    static int nBubbles(const Plans& micros, int devid, int from_step, int to_step);
 };

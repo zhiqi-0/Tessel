@@ -3,6 +3,7 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <limits>
 #include <cstdio>
 #include <sstream>
@@ -104,6 +105,8 @@ bool Block2Hash::samePlan(const SchedPlan& sched1, const SchedPlan sched2) {
 Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<float>& memory,
                             bool silence, int opt_step_upbound, int nworkers) {
 
+    const int ndevs = micros.at(0).nDevs();
+    
     // construct block mapping to micro index
     Block2Idx blk2idx;
     for (std::size_t i = 0; i < micros.size(); ++i) {
@@ -115,13 +118,17 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
     std::size_t total_status = 1;
     Block2Hash blk2hash(micros);
 
-    int step = 0;
-    // init opt_step upper boundary
-    int opt_step = 0;
+    std::vector<int> minsteps(ndevs, 0);
     for (auto& micro : micros) {
-        opt_step += micro.nSteps();
+        for (int devid = 0; devid < ndevs; ++devid) {
+            for (auto blk : micro.devBlocks(devid, 0)) {
+                minsteps[devid] += blk->span;
+            }
+        }
     }
-    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
+
+    int opt_step_lbound = *(std::max_element(minsteps.begin(), minsteps.end()));
+    int opt_step_rbound = opt_step_upbound > 0 ? opt_step_upbound : std::accumulate(minsteps.begin(), minsteps.end(), 0);
 
     // ============== BFS search ==============
     
@@ -131,23 +138,28 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
     std::vector<SchedPlan> schedules;
 
     // BFS steps
-    while (step < opt_step) {
+    int step = 0;
+    // explain why <= instead of <: to avoid exit at begining due to arguement parse
+    while (step < opt_step_rbound and opt_step_lbound <= opt_step_rbound) {
         if (!silence) std::cout << "solving step " << step << ", candidates: " << curr.size() << std::endl;
         const int ncandidates = curr.size();
 
         std::vector<std::size_t> num_next(nworkers, 0);
-        std::vector<int> local_opts(nworkers, opt_step);
+        std::vector<int> rsteps(nworkers, opt_step_rbound);
         #pragma omp parallel num_threads(nworkers)
         {
             int tid = omp_get_thread_num();
             int start = curr.size() / nworkers * tid;
             int stop = (tid == nworkers - 1) ? ncandidates : start + ncandidates / nworkers;
-            int local_opt_step = opt_step;
+            int rstep = opt_step_rbound;
             std::vector<Plans> local_next;
             std::vector<SchedPlan> local_schedules;
             for (int idx = start; idx < stop; idx++) {
                 auto candidates_and_schedules = Composer::resolveStep(
-                    curr[idx], memory, step, local_opt_step, blk2hash, blk2idx);
+                    curr[idx], memory, step,
+                    blk2hash, blk2idx,
+                    rstep, minsteps
+                );
                 local_next.insert(
                     local_next.end(),
                     candidates_and_schedules.first.begin(),
@@ -158,28 +170,26 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
                 for (auto& ms : candidates_and_schedules.first) {
                     int opt_step_bound = step + 1;
                     for (auto& micro : ms) {
-                        if (micro.nSteps() > step) {
-                            opt_step_bound += micro.nSteps() - step - 1;
-                        }
+                        opt_step_bound += std::max(micro.nSteps() - step - 1, 0);
                     }
-                    if (opt_step_bound < local_opt_step) {
+                    if (opt_step_bound < rstep) {
                         local_schedules.clear();
-                        local_opt_step = opt_step_bound;
+                        rstep = opt_step_bound;
                     }
                 }
 
                 for (auto& sched : candidates_and_schedules.second) {
-                    if (sched.nSteps() < local_opt_step) {
-                        local_opt_step = sched.nSteps();
+                    if (sched.nSteps() < rstep) {
+                        rstep = sched.nSteps();
                         local_schedules.clear();
                     }
-                    if (sched.nSteps() == local_opt_step) {
+                    if (sched.nSteps() == rstep) {
                         local_schedules.push_back(sched);
                     }
                 }
             }
             num_next[tid] = local_next.size();
-            local_opts[tid] = local_opt_step;
+            rsteps[tid] = rstep;
 
             #pragma omp barrier
 
@@ -190,10 +200,10 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
                     total_next += num;
                 }
                 next.resize(total_next);
-                for (int local_opt : local_opts) {
-                    if (local_opt < opt_step) {
+                for (int local_opt : rsteps) {
+                    if (local_opt < opt_step_rbound) {
                         if (!silence) { printf("find fewer steps: %d\n", local_opt); }
-                        opt_step = local_opt;
+                        opt_step_rbound = local_opt;
                         schedules.clear();
                     }
                 }
@@ -210,7 +220,7 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
             #pragma omp critical
             {
-                if (local_opt_step == opt_step) {
+                if (rstep == opt_step_rbound) {
                     schedules.insert(
                         schedules.end(), local_schedules.begin(), local_schedules.end()
                     );
@@ -227,7 +237,7 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
     if (!silence) {
         std::cout << "search done on " << total_status << " cases. "
                   << "find " << schedules.size() << " tight step-optimal plans "
-                  << "(step = " << opt_step << ")" << std::endl;
+                  << "(step = " << opt_step_rbound << ")" << std::endl;
     }
     return schedules;
 }
@@ -235,7 +245,7 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                bool silence, int opt_step_upbound, int nworkers) {
-
+    const int ndevs = micros.at(0).nDevs();
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;
     
@@ -254,11 +264,14 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
     std::vector<Item> stack;
     Plans schedules;
 
-    int opt_step = 0;
+    std::vector<int> minsteps(ndevs, 0);
     for (auto& micro : micros) {
-        opt_step += micro.nSteps();
+        for (int devid = 0; devid < ndevs; ++devid) {
+            minsteps[devid] += micro.devBlocks(devid, 0).size();
+        }
     }
-    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
+
+    int opt_step = (opt_step_upbound > 0) ? opt_step_upbound : std::accumulate(minsteps.begin(), minsteps.end(), 0);
 
     stack.emplace_back(0, std::vector<Plans>(1, micros));
     while (!stack.empty()) {
@@ -272,14 +285,14 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         }
 
         // encode the rest problem as a searched problem
-        std::string prob = encode(micros, step);
-        if (explored.find(prob) != explored.end() and step < explored[prob]) {
-            continue;
-        }
-        explored.insert_or_assign(prob, step);
+        // std::string prob = encode(micros, step);
+        // if (explored.find(prob) != explored.end() and step < explored[prob]) {
+        //     continue;
+        // }
+        // explored.insert_or_assign(prob, step);
 
         auto plans_scheds = Composer::resolveStep(
-            micros, memory, step, opt_step, blk2hash, blk2idx);
+            micros, memory, step, blk2hash, blk2idx, opt_step, minsteps);
 
         if (plans_scheds.first.size() > 0) {
             stack.emplace_back(step+1, plans_scheds.first);
@@ -312,6 +325,7 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
 
 Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence, int opt_step_upbound, int nworkers) {
+    const int ndevs = micros.at(0).nDevs();
     // upbound to handle
     const std::size_t breadth = nworkers * 128;
     // remain_step_hash : current step
@@ -332,14 +346,17 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
     std::vector<Item> stack;
     Plans schedules;
 
-    int opt_step = 0;
+    std::vector<int> minsteps(ndevs, 0);
     for (auto& micro : micros) {
-        opt_step += micro.nSteps();
+        for (int devid = 0; devid < ndevs; ++devid) {
+            minsteps[devid] += micro.devBlocks(devid, 0).size();
+        }
     }
-    opt_step = (opt_step_upbound == -1) ? opt_step : opt_step_upbound;
+    int opt_step = (opt_step_upbound > 0) ? opt_step_upbound : std::accumulate(minsteps.begin(), minsteps.end(), 0);
+    int opt_step_lbound = *(std::max_element(minsteps.begin(), minsteps.end()));
 
     stack.emplace_back(0, std::vector<Plans>(1, micros));
-    while (!stack.empty()) {
+    while (!stack.empty() and opt_step > opt_step_lbound) {
         Item& item = stack.back();
         int step = item.first;
         int nplans = std::min(item.second.size(), breadth);
@@ -370,17 +387,17 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
 
             // prune the same problem
             std::vector<bool> prunes(stop-start, false);
-            #pragma omp critical
-            {
-                for (int idx = 0; idx < stop-start; ++idx) {
-                    if (explored.find(probs[idx]) != explored.end() and step < explored[probs[idx]]) {
-                        prunes[idx] = true;
-                    }
-                    else {
-                        explored.insert_or_assign(probs[idx], step);
-                    }
-                }
-            }
+            // #pragma omp critical
+            // {
+            //     for (int idx = 0; idx < stop-start; ++idx) {
+            //         if (explored.find(probs[idx]) != explored.end() and step < explored[probs[idx]]) {
+            //             prunes[idx] = true;
+            //         }
+            //         else {
+            //             explored.insert_or_assign(probs[idx], step);
+            //         }
+            //     }
+            // }
 
             for (int idx = start; idx < stop; ++idx) {
                 
@@ -388,7 +405,8 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
  
                 Plans& micros = plans.at(idx);
                 auto plans_scheds = Composer::resolveStep(
-                    micros, memory, step, opt_step, blk2hash, blk2idx
+                    micros, memory, step, blk2hash, blk2idx,
+                    opt_step, minsteps
                 );
 
                 #pragma omp critical
@@ -435,8 +453,8 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
 
 std::pair<std::vector<Plans>, std::vector<SchedPlan>>
 Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
-                      int step, int upper_opt_step,
-                      const Block2Hash& blk2hash, Block2Idx& blk2idx) {
+                      int step, const Block2Hash& blk2hash, Block2Idx& blk2idx,
+                      int rstep, const std::vector<int>& minsteps) {
 
     int ndevs = micros[0].nDevs();
 
@@ -473,24 +491,29 @@ Composer::resolveStep(const Plans& micros, const std::vector<float>& memory,
         // std::cout << "prev:\n"; for (auto& micro : cmicros) std::cout << micro << std::endl;
         if (SchedPlan::stackable(cmicros, memory)) {
             SchedPlan sched = SchedPlan::stack(cmicros);
-            upper_opt_step = std::min(sched.nSteps(), upper_opt_step);
-            if (sched.nSteps() <= upper_opt_step) {
+            rstep = std::min(sched.nSteps(), rstep);
+            if (sched.nSteps() <= rstep) {
                 schedules.push_back(sched);
             }
         }
         else {
-            // pruning technique: discard plans that exceed opt_step
+            // pruning technique: discard plans that exceed rstep
             bool discard = false;
-            for (auto& micro : cmicros) {
-                // ==========> change this to upper_opt_step - 1 will make faster
-                if (micro.nSteps() > upper_opt_step) {
+            // for (auto& micro : cmicros) {
+            //     if (micro.nSteps() > rstep) {
+            //         discard = true;
+            //         break;
+            //     }
+            // }
+            for (int devid = 0; devid < ndevs; ++devid) {
+                int nbubbles = Composer::nBubbles(cmicros, devid, 0, step+1);
+                if (rstep - minsteps[devid] < nbubbles) {
                     discard = true;
                     break;
                 }
             }
-            if (!discard) {
-                next.push_back(cmicros);
-            }
+            if (discard) continue;
+            next.push_back(cmicros);
         }
     }
     // std::cout << "=====<" << std::endl;
@@ -768,4 +791,28 @@ float Composer::currMemory(const Plans& micros, int devid, int from_step, int to
         }
     }
     return curr_mem;
+}
+
+int Composer::nBubbles(const Plans& micros, int devid, int from_step, int to_step) {
+    int nbubbles = 0;
+    Block* blk = nullptr;
+    int t = from_step;
+    while (t < to_step) {
+        bool is_bubble = true;
+        for (auto& micro : micros) {
+            blk = micro.getBlock(devid, t);
+            if (blk != nullptr) {
+                is_bubble = false;
+                break;
+            }
+        }
+        if (is_bubble) {
+            nbubbles += 1;
+            t += 1;
+        }
+        else {
+            t += blk->span;
+        }
+    }
+    return nbubbles;
 }
