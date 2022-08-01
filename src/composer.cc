@@ -12,6 +12,7 @@
 
 #include <composer.h>
 
+
 template<typename T>
 void _debug_print(const T& blocks) {
     for (Block* blk : blocks) {
@@ -19,9 +20,18 @@ void _debug_print(const T& blocks) {
     }
 }
 
-std::string encode(const std::vector<int>& steps) {
+std::string encode(const Plans& micros, int step) {
+    const int ndevs = micros.at(0).nDevs();
+    std::vector<int> prob;
+    prob.reserve(micros.size() + ndevs);
+    for (std::size_t idx = 0; idx < micros.size(); ++idx) {
+        prob.push_back(std::max(micros[idx].nSteps() - step, 0));
+    }
+    for (int devid = 0; devid < ndevs; ++devid) {
+        prob.push_back(Composer::currMemory(micros, devid, 0, step));
+    }
     std::stringstream ss;
-    for (auto it = steps.begin(); it != steps.end(); ++it) {
+    for (auto it = prob.begin(); it != prob.end(); ++it) {
         ss << *it;
     }
     return ss.str();
@@ -125,28 +135,6 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
         if (!silence) std::cout << "solving step " << step << ", candidates: " << curr.size() << std::endl;
         const int ncandidates = curr.size();
 
-        // ==================== single thread version =================
-        // for (int idx = 0; idx < ncandidates; ++idx) {
-        //     auto candidates_and_schedules = Composer::resolveStep(curr[idx], memory, step, opt_step, blk2hash, blk2idx);
-        //     next.insert(
-        //         next.end(),
-        //         candidates_and_schedules.first.begin(),
-        //         candidates_and_schedules.first.end()
-        //     );
-        // 
-        //     for (auto& sched : candidates_and_schedules.second) {
-        //         if (sched.nSteps() < opt_step) {
-        //             if (!silence) std::cout << "find fewer steps: " << sched.nSteps() << std::endl;
-        //             opt_step = sched.nSteps();
-        //             schedules.clear();
-        //         }
-        //         if (sched.nSteps() == opt_step) {
-        //             schedules.push_back(sched);
-        //         }
-        //     }
-        // }
-    
-        // ==================== openmp parallelized version =================
         std::vector<std::size_t> num_next(nworkers, 0);
         std::vector<int> local_opts(nworkers, opt_step);
         #pragma omp parallel num_threads(nworkers)
@@ -178,22 +166,6 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
                         local_schedules.clear();
                         local_opt_step = opt_step_bound;
                     }
-                    // if (opt_step_bound == local_opt_step) {
-                    //     Plans stack_part;
-                    //     Plans concat_part;
-                    //     for (auto& micro : ms) {
-                    //         stack_part.push_back(micro.selectSteps(0, step+1));
-                    //         concat_part.push_back(micro.selectSteps(step+1, -1));
-                    //     }
-                    //     SchedPlan stacked = SchedPlan::stack(stack_part);
-                    //     SchedPlan concated = SchedPlan::concat(concat_part);
-                    //     Plans to_concat = {stacked, concated};
-                    //     SchedPlan sched = SchedPlan::concat(to_concat);
-                    //     std::cout << "--stacked\n" << stacked << std::endl;
-                    //     std::cout << "--concated\n" << concated << std::endl;
-                    //     std::cout << "--\n" << sched << std::endl;
-                    //     local_schedules.push_back(sched);
-                    // }
                 }
 
                 for (auto& sched : candidates_and_schedules.second) {
@@ -263,7 +235,6 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                bool silence, int opt_step_upbound, int nworkers) {
-    int ndevs = micros.at(0).nDevs();
 
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;
@@ -295,22 +266,13 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         int step = item.first;
         Plans micros = item.second.back();
 
-        // encode the rest problem as a searched problem
-        std::vector<int> msteps;
-        msteps.reserve(micros.size() + ndevs);
-        for (std::size_t idx = 0; idx < micros.size(); ++idx) {
-            msteps.push_back(micros[idx].nSteps() - step);
-        }
-        for (int devid = 0; devid < ndevs; ++devid) {
-            msteps.push_back(Composer::currMemory(micros, devid, 0, step));
-        }
-        std::string prob = encode(msteps);
-
         item.second.pop_back();
         if (item.second.empty()) {
             stack.pop_back();
         }
 
+        // encode the rest problem as a searched problem
+        std::string prob = encode(micros, step);
         if (explored.find(prob) != explored.end() and step < explored[prob]) {
             continue;
         }
@@ -350,7 +312,6 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
 
 Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence, int opt_step_upbound, int nworkers) {
-    int ndevs = micros.at(0).nDevs();
     // upbound to handle
     const std::size_t breadth = nworkers * 128;
     // remain_step_hash : current step
@@ -404,15 +365,7 @@ Plans Composer::stepOptimalBDFS(Plans micros, const std::vector<float>& memory,
             std::vector<std::string> probs(stop-start);
             for (int idx = 0; idx < stop-start; ++idx) {
                 Plans& micros = plans.at(idx);
-                std::vector<int> msteps;
-                msteps.reserve(micros.size() + ndevs);
-                for (std::size_t mid = 0; mid < plans[idx].size(); ++mid) {
-                    msteps.push_back(micros[mid].nSteps() - step);
-                }
-                for (int devid = 0; devid < ndevs; ++devid) {
-                    msteps.push_back(Composer::currMemory(micros, devid, 0, step));
-                }
-                probs[idx] = encode(msteps);
+                probs[idx] = encode(micros, step);
             }
 
             // prune the same problem
