@@ -103,7 +103,7 @@ bool Block2Hash::samePlan(const SchedPlan& sched1, const SchedPlan sched2) {
 // ******************* Composer *******************
 
 Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<float>& memory,
-                            bool silence, int opt_step_upbound, int nworkers) {
+                            bool silence, int rstep, int nworkers) {
 
     const int ndevs = micros.at(0).nDevs();
     
@@ -127,8 +127,13 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
         }
     }
 
+    // find a plan using heuristic
+    SchedPlan concat = SchedPlan::concat(micros);
+    concat = Composer::tighten_all(concat, memory);
+
     int opt_step_lbound = *(std::max_element(minsteps.begin(), minsteps.end()));
-    int opt_step_rbound = opt_step_upbound > 0 ? opt_step_upbound : std::accumulate(minsteps.begin(), minsteps.end(), 0);
+    int opt_step_rbound = rstep < 0 ? concat.nSteps() : std::min(concat.nSteps(), rstep);
+    if (!silence) std::cout << "setting up bound of opt step to " << opt_step_rbound << std::endl;
 
     // ============== BFS search ==============
     
@@ -137,10 +142,14 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
     std::vector<Plans> next;
     std::vector<SchedPlan> schedules;
 
+    if (concat.nSteps() <= opt_step_rbound) {
+        schedules.push_back(concat);
+    }
+
     // BFS steps
     int step = 0;
     // explain why <= instead of <: to avoid exit at begining due to arguement parse
-    while (step < opt_step_rbound and opt_step_lbound <= opt_step_rbound) {
+    while (step < opt_step_rbound) {
         if (!silence) std::cout << "solving step " << step << ", candidates: " << curr.size() << std::endl;
         const int ncandidates = curr.size();
 
@@ -232,6 +241,9 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
         curr.clear();
         std::swap(curr, next);
         ++step;
+        if (opt_step_lbound == opt_step_rbound and schedules.size() > 0) {
+            break;
+        }
     }
 
     if (!silence) {
@@ -244,7 +256,7 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
 
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
-                               bool silence, int opt_step_upbound, int nworkers) {
+                               bool silence, int rstep, int nworkers) {
     const int ndevs = micros.at(0).nDevs();
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;
@@ -271,7 +283,13 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         }
     }
 
-    int opt_step = (opt_step_upbound > 0) ? opt_step_upbound : std::accumulate(minsteps.begin(), minsteps.end(), 0);
+    // find a plan using heuristic
+    SchedPlan concat = SchedPlan::concat(micros);
+    concat = Composer::tighten_all(concat, memory);
+
+    int opt_step = (rstep < 0) ? concat.nSteps() : std::min(concat.nSteps(), rstep);
+    if (concat.nSteps() == opt_step) schedules.push_back(concat);
+    int opt_step_lbound = *(std::max_element(minsteps.begin(), minsteps.end()));
 
     stack.emplace_back(0, std::vector<Plans>(1, micros));
     while (!stack.empty()) {
@@ -311,6 +329,10 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         total_status += 1;
         if (total_status % 1000 == 0) {
             if (!silence) std::cout << "\rsearched " << total_status << "/? cases" << std::flush;
+        }
+
+        if (schedules.size() > 0 and opt_step == opt_step_lbound) {
+            break;
         }
     }
 
@@ -793,6 +815,7 @@ float Composer::currMemory(const Plans& micros, int devid, int from_step, int to
     return curr_mem;
 }
 
+
 int Composer::nBubbles(const Plans& micros, int devid, int from_step, int to_step) {
     int nbubbles = 0;
     Block* blk = nullptr;
@@ -815,4 +838,66 @@ int Composer::nBubbles(const Plans& micros, int devid, int from_step, int to_ste
         }
     }
     return nbubbles;
+}
+
+
+SchedPlan& Composer::tighten_all(SchedPlan& sched, const std::vector<float>& memory) {
+    for (int step = 0; step < sched.nSteps(); ++step) {
+        for (auto blk : sched.stepBlocks(step)) {
+            if (!sched.isTheStart(blk, step)) continue;
+            sched = Composer::tighten(sched, blk, memory);
+        }
+    }
+    return sched;
+}
+
+
+SchedPlan& Composer::tighten(SchedPlan& sched, Block* blk, const std::vector<float>& memory) {
+    std::vector<int> devids = sched.getDevice(blk);
+    int step = sched.getStep(blk);
+    int minstep = 0;
+    for (auto bblk : blk->before) {
+        if (!sched.haveBlock(bblk)) continue;
+        minstep = std::max(minstep, sched.getStep(bblk) + bblk->span);
+    }
+    if (minstep >= step) return sched;
+
+    int free_steps = 0;
+    for (int t = minstep; t < step + blk->span - 1; ++t) {
+        // check step slots
+        bool have_block = false;
+        for (int devid : devids) {
+            if (sched.getBlock(devid, t) != nullptr) {
+                have_block = true;
+                break;
+            }
+        }
+        if (have_block) {
+            free_steps = 0;
+            continue;
+        }
+        else {
+            free_steps += 1;
+            if (free_steps < blk->span) {
+                continue;
+            }
+        }
+
+        bool exceed_memory = false;
+        sched.setPosition(blk, devids, t-blk->span+1);
+        for (int devid : devids) {
+            if (sched.peakMemory(devid) > memory[devid]) {
+                exceed_memory = true;
+                break;
+            }
+        }
+        if (exceed_memory) {
+            sched.setPosition(blk, devids, step);
+            free_steps = 0;
+            continue;
+        }
+        // success
+        break;
+    }
+    return sched;
 }

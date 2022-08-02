@@ -152,4 +152,9 @@ class Composer {
     static float currMemory(const Plans& micros, int devid, int from_step, int to_step);
 
     static int nBubbles(const Plans& micros, int devid, int from_step, int to_step);
+
+    static SchedPlan& tighten_all(SchedPlan& sched, const std::vector<float>& memory);
+
+    static SchedPlan& tighten(SchedPlan& sched, Block* blk, const std::vector<float>& memory);
+
 };

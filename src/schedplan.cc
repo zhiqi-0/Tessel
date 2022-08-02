@@ -129,7 +129,13 @@ void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
     }
     this->_block_devices[block] = devices;
     this->_block_steps[block] = step;
-    this->_maxsteps = std::max(this->_maxsteps, step + block->span - 1);
+
+    // set _maxsteps
+    this->_maxsteps = 0;
+    for (Block* blk : this->allBlocks()) {
+        this->_maxsteps = std::max(this->_maxsteps, this->getStep(blk) + blk->span - 1);
+    }
+
 }
 
 
