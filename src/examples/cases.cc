@@ -160,6 +160,88 @@ class Premise {
         return micros;
     }
 
+    static std::vector<SchedPlan> vlmodel(int ndevs, int nmicros){
+        /**
+         * @brief vision-language two tower model.
+         * Replicated at last forward of each branch
+         * 
+         * f   f b   b
+         *   f f b b 
+         *   f f b b 
+         * f   f b   b
+         *
+         */
+        Plans micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs * 3);
+            
+            // text encoder
+            std::vector<Block*> te_blks(ndevs, nullptr);
+            std::vector<int> te_devs(ndevs, -1);
+            for (int idx = 0; idx < ndevs / 2; ++idx) {
+                te_blks[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+                te_devs[idx] = idx;
+                te_blks[ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+                te_devs[ndevs-1-idx] = idx;
+            }
+
+            // visual encoder
+            std::vector<Block*> ve_blks(ndevs, nullptr);
+            std::vector<int> ve_devs(ndevs, -1);
+            for (int idx = 0; idx < ndevs / 2; ++idx) {
+                ve_blks[idx] = new Block(mid, BlockType::Forward, 1.0, 1);
+                ve_devs[idx] = ndevs - 1 - idx;
+                ve_blks[ndevs-1-idx] = new Block(mid, BlockType::Backward, 1.0, 2);
+                ve_devs[ndevs-1-idx] = ndevs - 1 - idx;
+            }
+
+            // cross-modal encoder
+            Block* fce = new Block(mid, BlockType::Forward, 1.0, 1);
+            Block* bce = new Block(mid, BlockType::Backward, 1.0, 2);
+            std::vector<int> ce_devs(ndevs);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                ce_devs[devid] = devid;
+            }
+
+            int step = 0;
+            // add te / ve forward
+            for (std::size_t idx = 0; idx < ve_blks.size() / 2; ++idx) {
+                micro.addBlock(te_blks[idx], te_devs[idx], step);
+                micro.addBlock(ve_blks[idx], ve_devs[idx], step);
+                step += te_blks[idx]->span;
+            }
+            // ad ce forward + backward
+            micro.addBlock(fce, ce_devs, step);
+            step += fce->span;
+            micro.addBlock(bce, ce_devs, step);
+            step += bce->span;
+            // add te / ve backward
+            for (std::size_t idx = 0; idx < ve_blks.size() / 2; ++idx) {
+                micro.addBlock(te_blks[ndevs / 2 + idx], te_devs[ndevs / 2 + idx], step);
+                micro.addBlock(ve_blks[ndevs / 2 + idx], ve_devs[ndevs / 2 + idx], step);
+                step += te_blks[ndevs / 2 + idx]->span;
+            }
+
+            // dependency
+            std::vector<Block*> ve_fblks(ve_blks.begin(), ve_blks.begin() + ndevs / 2);
+            std::vector<Block*> ve_bblks(ve_blks.begin() + ndevs / 2, ve_blks.end());
+            std::vector<Block*> te_fblks(te_blks.begin(), te_blks.begin() + ndevs / 2);
+            std::vector<Block*> te_bblks(te_blks.begin() + ndevs / 2, te_blks.end());
+            
+            Block::addDependencies(ve_fblks);
+            Block::addDependencies(te_fblks);
+            Block::addDependency(ve_blks[ndevs/2-1], fce);
+            Block::addDependency(te_blks[ndevs/2-1], fce);
+            Block::addDependency(fce, bce);
+            Block::addDependency(bce, ve_blks[ndevs/2]);
+            Block::addDependency(bce, te_blks[ndevs/2]);
+            Block::addDependencies(ve_bblks);
+            Block::addDependencies(te_bblks);
+            micros.push_back(micro);
+        }
+        return micros;
+    }
+
     static std::vector<SchedPlan> alphafold(int ndevs, int nmicros) {
         int repeat_forward = 3;
         Plans micros;
@@ -251,6 +333,7 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         std::cout << "Premise Micro ID# " << mid << ":\n";
         std::cout << micros[mid] << std::endl;
     }
+    micros[0].to_json("micro1.json");
     std::vector<float> memory(ndevs, dev_memory);
 
     // step optimal search
@@ -318,6 +401,8 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
     std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
               << "bubble rate: " << min_bubble_rate << std::endl
               << "Generalization time: " << float(timer.elapsed()) / 1000 << " seconds\n"; 
+
+    best_plan.to_json("general_plan.json");
 }
 
 
@@ -338,6 +423,9 @@ int main(int argc, const char* argv[]) {
     );
     premises.emplace(
         std::string("alphafold"), std::function<PremiseFunc>(Premise::alphafold)
+    );
+    premises.emplace(
+        std::string("vlmodel"), std::function<PremiseFunc>(Premise::vlmodel)
     );
 
     CmdParser parser;

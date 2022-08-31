@@ -265,6 +265,14 @@ class SchedPlan {
         return out;
     }
 
+    /**
+     * @brief Export the plan to json file
+     * 
+     * @param filename: the json file name
+     */
+
+    void to_json(const std::string& filename) const;
+
 };
 
 

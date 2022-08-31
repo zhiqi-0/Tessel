@@ -2,6 +2,8 @@
 #include <unique.h>
 #include <iostream>
 #include <limits>
+#include <sstream>
+#include <fstream>
 
 // ***** Plan Constructor ********
 
@@ -494,6 +496,60 @@ std::string SchedPlan::toStr() const {
         dscp += "\n";
     }
     return dscp;
+}
+
+
+void SchedPlan::to_json(const std::string& filename) const {
+    std::string dscp;
+    dscp += "{";
+
+    // ndevs
+    dscp += "\"ndevs\":";
+    dscp += std::to_string(this->_ndevs) + ",";
+
+    // blocks
+    dscp += "\"blocks\":[";
+    int idx = 0;
+    for (Block* block : this->_blocks) {
+
+        // device string
+        std::string dev_string;
+        dev_string += "[";
+        std::vector<int> devices(this->_block_devices.at(block));
+        for (std::size_t idx = 0; idx < devices.size(); ++idx) {
+            if (idx != 0) dev_string += ",";
+            dev_string += std::to_string(devices[idx]);
+        }
+        dev_string += "]";
+
+        // type string
+        std::string btype = block->btype == BlockType::Forward ? "\"forward\"" : "\"backward\"";
+
+        // block string
+        std::ostringstream oss;
+        if (idx != 0) oss << ",";
+        oss << "{"
+            << "\"mid\"" << ":" << block->mid << ","
+            << "\"span\"" << ":" << block->span << ","
+            << "\"memory\"" << ":" << block->memory << ","
+            << "\"btype\"" << ":" << btype << ","
+            << "\"step\"" << ":" << this->_block_steps.at(block) << ","
+            << "\"device\"" << ":" << dev_string
+            << "}";
+        std::string blk_dscp = oss.str();
+        // mid
+        std::vector<int> devs = this->_block_devices.at(block);
+        dscp += blk_dscp;
+        idx += 1;
+    }
+    dscp += "]";
+
+    dscp += "}";
+
+    // to outfile
+    std::fstream file;
+    file.open(filename, std::ios_base::out);
+    file << dscp;
 }
 
 
