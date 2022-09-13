@@ -17,6 +17,13 @@ class Generalizer {
         const int nworkers = 1
     );
 
+    static GeneralSchedPlan tightenHeuristic(
+        const SchedPlan& sched,
+        const std::vector<float>& memory,
+        const int steady_opt_step_upbound = -1,
+        const int nworkers = 1
+    );
+
     static SchedPlan& loosen_all(
         SchedPlan& sched,
         const std::vector<float>& memory,

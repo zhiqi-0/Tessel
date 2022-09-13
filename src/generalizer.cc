@@ -49,6 +49,44 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(
 }
 
 
+GeneralSchedPlan Generalizer::tightenHeuristic(
+  const SchedPlan& sched,
+  const std::vector<float>& memory,
+  const int steady_opt_step_upbound,
+  const int nworkers) {
+
+    std::set<int> mids;
+    for (auto blk : sched.allBlocks()) {
+        mids.insert(blk->mid);
+    }
+    SchedPlan lsched(sched);
+    lsched = Generalizer::loosen_all(lsched, memory, true);
+    SchedPlan rsched = lsched.increaseMid(mids.size());
+    // std::cout << "lsched:\n" << lsched << std::endl;
+    // split to head-tail
+    SchedPlan lhead = lsched.selectSteps(0, sched.nSteps() / 2);
+    SchedPlan ltail = lsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    SchedPlan rhead = rsched.selectSteps(0, sched.nSteps() / 2);
+    SchedPlan rtail = rsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    // step optimal compose
+    Plans tail_heads = {ltail, rhead};
+
+    std::vector<float> steady_memory(sched.nDevs());
+    for (int devid = 0; devid < sched.nDevs(); ++devid) {
+        float curr_mem = lhead.currMemory(devid);
+        steady_memory[devid] = memory[devid] - curr_mem;
+    }
+    SchedPlan steady = SchedPlan::concat(tail_heads);
+    steady = Composer::tighten_all(steady, steady_memory);
+    
+    GeneralSchedPlan gplan(lhead, steady, rtail);
+    for (auto blk : rsched.allBlocks()) {
+        gplan.addCreatedBlocks(blk);
+    }
+    return gplan;
+}
+
+
 SchedPlan& Generalizer::loosen_all(SchedPlan& sched, const std::vector<float>& memory, bool only_forward) {
     for (int step = sched.nSteps() - 1; step >= 0; --step) {
         for (auto blk : sched.stepBlocks(step)) {
@@ -64,16 +102,16 @@ SchedPlan& Generalizer::loosen_all(SchedPlan& sched, const std::vector<float>& m
 SchedPlan& Generalizer::loosen(SchedPlan& sched, Block* blk, const std::vector<float>& memory, const int bound) {
     auto devids = sched.getDevice(blk);
     int step = sched.getStep(blk);
-    int maxstep = (bound == -1) ? sched.nSteps() : bound;
+    int maxstep = (bound == -1) ? sched.nSteps() - 1 : bound;
     for (auto ablk : blk -> after) {
         if (sched.haveBlock(ablk)) {
-            maxstep = std::min(maxstep, sched.getStep(ablk));
+            maxstep = std::min(maxstep, sched.getStep(ablk) - 1);
         }
     }
     if (maxstep <= step) return sched;
 
     int free_steps = 0;
-    for (int t = maxstep - 1; t > step; --t) {
+    for (int t = maxstep; t > step; --t) {
         // check step slots
         bool have_block = false;
         for (int devid : devids) {
@@ -104,6 +142,7 @@ SchedPlan& Generalizer::loosen(SchedPlan& sched, Block* blk, const std::vector<f
         }
         if (exceed_memory) {
             sched.setPosition(blk, devids, step);
+            free_steps -= 1;
             continue;
         }
         // sucess

@@ -893,7 +893,7 @@ SchedPlan& Composer::tighten(SchedPlan& sched, Block* blk, const std::vector<flo
         }
         if (exceed_memory) {
             sched.setPosition(blk, devids, step);
-            free_steps = 0;
+            free_steps -= 1;
             continue;
         }
         // success
