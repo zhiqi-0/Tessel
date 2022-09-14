@@ -151,6 +151,12 @@ class SchedPlan {
      */
     void addBlockSeq(const std::vector<Block*>& blocks, const std::vector<int>& devices);
 
+    /**
+     * @brief Sequeeze the plan by moving empty head steps and empty tail steps
+     * 
+     */
+    void squeeze();
+
     // ***** Plan Property ********
 
     inline int nDevs() const { return this->_ndevs; }
@@ -197,6 +203,12 @@ class SchedPlan {
 
     const std::set<Block*> allBlocks() const { return _blocks; }
 
+    /**
+     * @brief Get blocks of the step. The blocks include not-the-start blocks.
+     * 
+     * @param step 
+     * @return std::vector<Block*> 
+     */
     std::vector<Block*> stepBlocks(int step) const;
 
     /**
@@ -222,7 +234,8 @@ class SchedPlan {
 
     /**
      * @brief Create a schedule plan that only contains blocks in steps of
-     * [from_step, to_step].
+     * [from_step, to_step]. the from_step will be increased if it is empty.
+     *
      * @note the first block that its starting step is before `from_step` but
      * its ending step is after `start_step` will not be considered.
      * @note the last block that its starting step is before `end_step` but

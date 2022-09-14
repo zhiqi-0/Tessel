@@ -67,6 +67,35 @@ class Premise {
         return micros;
     }
 
+    static std::vector<SchedPlan> embed(int ndevs, int nmicros) {
+        std::vector<SchedPlan> micros;
+        for (int mid = 0; mid < nmicros; ++mid) {
+            SchedPlan micro(ndevs, ndevs);
+            std::vector<Block*> blocks(ndevs * 2, nullptr);
+            std::vector<std::vector<int>> devs(ndevs * 2);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
+                devs[devid] = std::vector<int>({devid});
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
+                devs[2*ndevs-1-devid] = std::vector<int>({devid});
+            }
+            Block* fembed = new Block(mid, BlockType::Forward, 1.0, 1);
+            Block* bembed = new Block(mid, BlockType::Backward, 1.0, 2);
+            std::vector<int> embed_devs(ndevs);
+            for (int devid = 0; devid < ndevs; ++devid) {
+                embed_devs[devid] = devid;
+            }
+            blocks.insert(blocks.begin(), fembed);
+            blocks.insert(blocks.end(), bembed);
+            devs.insert(devs.begin(), embed_devs);
+            devs.insert(devs.end(), embed_devs);
+            micro.addBlockSeq(blocks, devs);
+            Block::addDependencies(blocks);
+            micros.push_back(micro);
+        }
+        return micros;
+    }
+
     static std::vector<SchedPlan> chimera(int ndevs, int nmicros) {
         /**
          * @brief chimera premise: bi-pipe
@@ -261,7 +290,7 @@ class Premise {
             // add backward blocks
             int ofst = repeat_forward * ndevs;
             for (int idx = 0; idx < ndevs; ++idx) {
-                blocks[ofst + idx] = new Block(mid, BlockType::Backward, 1.0, 1);
+                blocks[ofst + idx] = new Block(mid, BlockType::Backward, 1.0, 2);
                 devs[ofst + idx] = ndevs - 1- idx;
             }
             micro.addBlockSeq(blocks, devs);
@@ -289,7 +318,7 @@ class Premise {
             for (int devid = 0; devid < ndevs; ++devid) {
                 blocks[devid] = new Block(mid, BlockType::Forward, 1.0, 1);
                 devs[devid] = std::vector<int>({devid});
-                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 1);
+                blocks[2*ndevs-1-devid] = new Block(mid, BlockType::Backward, 1.0, 2);
                 devs[2*ndevs-1-devid] = std::vector<int>({devid});
             }
             //
@@ -298,14 +327,14 @@ class Premise {
                 blk_dev[idx] = idx;
             }
             Block* fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
-            Block* bblock_full = new Block(mid, BlockType::Backward, 1.0, 1);
+            Block* bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
             blocks.insert(blocks.begin(), fblock_full);
             devs.insert(devs.begin(), blk_dev);
             blocks.insert(blocks.end(), bblock_full);
             devs.insert(devs.end(), blk_dev);
             //
             fblock_full = new Block(mid, BlockType::Forward, 1.0, 1);
-            bblock_full = new Block(mid, BlockType::Backward, 1.0, 1);
+            bblock_full = new Block(mid, BlockType::Backward, 1.0, 2);
             blocks.insert(blocks.begin()+1+ndevs/2, fblock_full);
             devs.insert(devs.begin()+1+ndevs/2, blk_dev);
             blocks.insert(blocks.begin()+2+ndevs*2-ndevs/2, bblock_full);
@@ -320,7 +349,9 @@ class Premise {
 };
 
 
-void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float dev_memory, int nworkers) {
+void search(std::function<PremiseFunc> premise,
+            int ndevs, int nmicros, float dev_memory, 
+            int nworkers, long budget) {
 
     CpuTimer timer;
 
@@ -333,16 +364,13 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         std::cout << "Premise Micro ID# " << mid << ":\n";
         std::cout << micros[mid] << std::endl;
     }
-    micros[0].to_json("micro1.json");
+    // micros[0].to_json("micro1.json");
     std::vector<float> memory(ndevs, dev_memory);
 
     // step optimal search
     timer.start();
-    // std::vector<SchedPlan> opt_plans = Composer::stepOptimal(
-    //     micros, memory, true, false, -1, nworkers
-    // );
-    std::vector<SchedPlan> opt_plans = Composer::stepOptimalBFS(
-        micros, memory, false, -1, nworkers
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimalDFS(
+        micros, memory, false, -1, nworkers, budget
     );
     timer.stop();
     std::cout << "step-optimal search time: "
@@ -368,6 +396,9 @@ void search(std::function<PremiseFunc> premise, int ndevs, int nmicros, float de
         GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
             opt_plans[idx], memory, min_steady_step - 1, nworkers
         );
+        // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
+        //     opt_plans[idx], memory, min_steady_step - 1, nworkers
+        // );
 
         if ((idx+1) % 10 == 0) {
             std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << " plans\n";
@@ -413,6 +444,9 @@ int main(int argc, const char* argv[]) {
         std::string("vshape"), std::function<PremiseFunc>(Premise::vshape)
     );
     premises.emplace(
+        std::string("embed"), std::function<PremiseFunc>(Premise::embed)
+    );
+    premises.emplace(
         std::string("chimera"), std::function<PremiseFunc>(Premise::chimera)
     );
     premises.emplace(
@@ -435,8 +469,13 @@ int main(int argc, const char* argv[]) {
     parser.add<float>("--memory", "memory consumpition of each device.");
     parser.add<int>("--nworkers", "number of worker for omp threads");
     parser.setDefault<int>("--nworkers", 1);
+    parser.add<int>("--budget", "set search budget, default -1 (infinity)");
+    parser.setDefault<int>("--budget", -1);
     parser.parse(argc, argv);
+
+    std::cout << "====================== Tetris Scheduling Composer =================" << std::endl;
     std::cout << parser << std::endl;
+    std::cout << "===================================================================" << std::endl;
 
     std::string premise_str = parser.get<std::string>("premise");
     std::cout << "premise str: " << premise_str << std::endl;
@@ -449,7 +488,8 @@ int main(int argc, const char* argv[]) {
         parser.get<int>("ndevs"),
         parser.get<int>("nmicros"),
         parser.get<float>("memory"),
-        parser.get<int>("nworkers")
+        parser.get<int>("nworkers"),
+        parser.get<int>("budget")
     );
 
     return 0;

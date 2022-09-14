@@ -19,9 +19,13 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(
     // std::cout << "lsched:\n" << lsched << std::endl;
     // split to head-tail
     SchedPlan lhead = lsched.selectSteps(0, sched.nSteps() / 2);
+    lhead.squeeze();
     SchedPlan ltail = lsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    ltail.squeeze();
     SchedPlan rhead = rsched.selectSteps(0, sched.nSteps() / 2);
+    rhead.squeeze();
     SchedPlan rtail = rsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    rtail.squeeze();
     // step optimal compose
     Plans tail_heads = {ltail, rhead};
     // std::cout << tail_heads[0] << std::endl << tail_heads[1] << std::endl;
@@ -31,7 +35,7 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(
         float curr_mem = lhead.currMemory(devid);
         steady_memory[devid] = memory[devid] - curr_mem;
     }
-    Plans steadies = Composer::stepOptimalBFS(
+    Plans steadies = Composer::stepOptimalDFS(
         tail_heads, steady_memory, true,
         steady_opt_step_upbound, nworkers
     );
@@ -65,9 +69,13 @@ GeneralSchedPlan Generalizer::tightenHeuristic(
     // std::cout << "lsched:\n" << lsched << std::endl;
     // split to head-tail
     SchedPlan lhead = lsched.selectSteps(0, sched.nSteps() / 2);
+    lhead.squeeze();
     SchedPlan ltail = lsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    ltail.squeeze();
     SchedPlan rhead = rsched.selectSteps(0, sched.nSteps() / 2);
+    rhead.squeeze();
     SchedPlan rtail = rsched.selectSteps(sched.nSteps() / 2, sched.nSteps());
+    rtail.squeeze();
     // step optimal compose
     Plans tail_heads = {ltail, rhead};
 

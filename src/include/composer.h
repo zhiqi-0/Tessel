@@ -121,7 +121,7 @@ class Composer {
      */
     static Plans stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                 bool silence = false, int opt_step_upbound = -1,
-                                int nworkers = 1);
+                                int nworkers = 1, const long budget = -1);
     /**
      * @brief parallel BFS-DFS impelmentation for search step optimal plan
      */

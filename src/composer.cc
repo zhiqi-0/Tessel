@@ -256,7 +256,7 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
 
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
-                               bool silence, int rstep, int nworkers) {
+                               bool silence, int rstep, int nworkers, const long budget) {
     const int ndevs = micros.at(0).nDevs();
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;
@@ -269,7 +269,7 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         }
     }
 
-    std::size_t total_status = 1;
+    long total_status = 1;
     Block2Hash blk2hash(micros);
 
     using Item = std::pair<int, std::vector<Plans>>;
@@ -332,6 +332,10 @@ Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
         }
 
         if (schedules.size() > 0 and opt_step == opt_step_lbound) {
+            break;
+        }
+
+        if (budget != -1 && total_status > budget) {
             break;
         }
     }

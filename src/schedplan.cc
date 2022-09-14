@@ -104,6 +104,39 @@ void SchedPlan::addBlockSeq(const std::vector<Block*>& blocks,
 }
 
 
+void SchedPlan::squeeze() {
+    // cut head
+    int empty_head = 0;
+    for (int t = 0; t < this->nSteps(); ++t) {
+        if (this->stepBlocks(t).size() != 0) {
+            break;
+        }
+        empty_head += 1;
+    }
+    if (empty_head > 0) {
+        for (int t = empty_head; t < this->nSteps(); ++t) {
+            for (Block* block : this->stepBlocks(t)) {
+                if (this->isTheStart(block, t)) {
+                    auto devids = this->getDevice(block);
+                    this->setPosition(block, devids, t - empty_head);
+                }
+            } 
+        }
+    }
+    // cut tail
+    int empty_tail = 0;
+    for (int t = this->nSteps() - 1; t >= 0; --t) {
+        if (this->stepBlocks(t).size() != 0) {
+            break;
+        }
+        empty_tail += 1;
+    }
+    if (empty_tail > 0) {
+        this->_maxsteps -= empty_tail;
+    }
+}
+
+
 void SchedPlan::setPosition(Block* block, std::vector<int> devices, int step) {
     if (step + block->span - 1 >= this->_reserve_steps) this->reserve((step + block->span - 1) * 2);
     if (!this->haveBlock(block)) {
@@ -290,6 +323,20 @@ std::vector<Block*> SchedPlan::devBlocks(int devid, int from_step, int to_step) 
 SchedPlan SchedPlan::selectSteps(int from_step, int to_step) const {
     SchedPlan sched(_ndevs, _reserve_steps);
     to_step = (to_step == -1 or to_step > _maxsteps) ? _maxsteps + 1 : to_step;
+    while (true) {
+        auto blks = this->stepBlocks(from_step);
+        bool have_start = false;
+        for (Block* blk : blks) {
+            if (this->isTheStart(blk, from_step)) {
+                have_start = true;
+                break;
+            }
+        }
+        if (have_start) {
+            break;
+        }
+        from_step += 1;
+    }
     for (int step = from_step; step < to_step; ++step) {
         for (auto blk : this->stepBlocks(step)) {
             auto devids = this->getDevice(blk);
