@@ -1,13 +1,180 @@
 
 #include <generalizer.h>
 #include <schedplan.h>
+#include <timer.h>
+#include <composer.h>
+#include <omp.h>
+
+
+GeneralSchedPlan Generalizer::searchDFS(
+  Plans micros, const std::vector<float>& memory,
+  int nworkers, const long budget) {
+
+    CpuTimer timer;
+
+    // step-optimal search
+    timer.start();
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimalDFS(
+        micros, memory, false, -1, 1, budget
+    );
+    timer.stop();
+    std::cout << "step-optimal search time: "
+              << float(timer.elapsed()) / 1000 
+              << " seconds" << std::endl;
+    if (opt_plans.size() == 0) {
+        std::cout << "No solution find." << std::endl;
+        exit(0);
+    }
+    else {
+        std::cout << "One of searched tight plans:" << std::endl
+                  << opt_plans[0] << std::endl;
+    }
+    
+    // generalize
+    timer.start();
+    GeneralSchedPlan best_plan;
+    float min_bubble_rate = 1.0;
+    float min_steady_step = opt_plans[0].nSteps() * 2;
+
+    int nsearched = 0;
+    const int ncandidates = opt_plans.size();
+    nworkers = nworkers < ncandidates ? nworkers : ncandidates;
+    #pragma omp parallel num_threads(nworkers)
+    {
+        int tid = omp_get_thread_num();
+        int start = opt_plans.size() / nworkers * tid;
+        int stop = (tid == nworkers - 1) ? ncandidates : start + ncandidates / nworkers;
+    
+        for (int idx = start; idx < stop; ++idx) {
+            // use heuristic search
+            GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
+                opt_plans[idx], memory, min_steady_step - 1, 1, budget
+            );
+            // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
+            //     opt_plans[idx], memory, min_steady_step - 1, nworkers
+            // );
+            if (gsched.isEmpty()) {
+                gsched.destroyCreatedBlocks();
+                continue;
+            }
+            float bubble_rate = gsched.steady_bubble_rate();
+
+            #pragma omp critical
+            {
+                if (bubble_rate < min_bubble_rate) {
+                    min_bubble_rate = bubble_rate;
+                    min_steady_step = gsched.getRBound() - gsched.getLBound();
+                    std::cout << "find generalized plan with bubble rate: "
+                              << min_bubble_rate << std::endl;
+                    std::cout << gsched << std::endl;
+                    best_plan.destroyCreatedBlocks();
+                    best_plan = gsched;
+                }
+                else {
+                    gsched.destroyCreatedBlocks();
+                }
+            }
+
+            #pragma omp barrier
+
+            #pragma omp single
+            {
+                if (min_bubble_rate == 0) {
+                    std::cout << "early stop as found 0-bubble plan\n";
+                }
+                
+                nsearched += nworkers;
+                std::cout << "searched " << nsearched << " / " << ncandidates 
+                          << " plans..." << std::endl;
+            }
+
+            if (min_bubble_rate == 0) {
+                break;
+            }
+        }
+    }
+    timer.stop();
+    std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
+              << "bubble rate: " << min_bubble_rate << std::endl
+              << "Generalization time: " << float(timer.elapsed()) / 1000 << " seconds\n";
+    
+    return best_plan;
+}
+
+
+GeneralSchedPlan Generalizer::searchBFS(
+  Plans micros, const std::vector<float>& memory,
+  int nworkers, const long budget) {
+
+    CpuTimer timer;
+
+    // step-optimal search
+    timer.start();
+    std::vector<SchedPlan> opt_plans = Composer::stepOptimalBFS(
+        micros, memory, false, -1, nworkers
+    );
+    timer.stop();
+    std::cout << "step-optimal search time: "
+              << float(timer.elapsed()) / 1000 
+              << " seconds" << std::endl;
+    
+    // generalize
+    timer.start();
+    GeneralSchedPlan best_plan;
+    float min_bubble_rate = 1.0;
+    float min_steady_step = opt_plans[0].nSteps() * 2;
+
+    const int ncandidates = opt_plans.size();
+    for (int idx = 0; idx < ncandidates; ++idx) {
+        // use heuristic search
+        GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
+            opt_plans[idx], memory, min_steady_step - 1, nworkers, budget
+        );
+        // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
+        //     opt_plans[idx], memory, min_steady_step - 1, nworkers
+        // );
+        if (gsched.isEmpty()) {
+            gsched.destroyCreatedBlocks();
+            continue;
+        }
+        float bubble_rate = gsched.steady_bubble_rate();
+
+        if (bubble_rate < min_bubble_rate) {
+            min_bubble_rate = bubble_rate;
+            min_steady_step = gsched.getRBound() - gsched.getLBound();
+            std::cout << "find generalized plan with bubble rate: "
+                      << min_bubble_rate << std::endl;
+            std::cout << gsched << std::endl;
+            best_plan.destroyCreatedBlocks();
+            best_plan = gsched;
+        }
+        else {
+            gsched.destroyCreatedBlocks();
+        }
+
+        if ((idx+1) % 10 == 0) {
+            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << " plans\n";
+        }
+
+        if (min_bubble_rate == 0) {
+            std::cout << "early stop as found 0-bubble plan\n";
+            break;
+        }
+    }
+    timer.stop();
+    std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
+              << "bubble rate: " << min_bubble_rate << std::endl
+              << "Generalization time: " << float(timer.elapsed()) / 1000 << " seconds\n";
+    
+    return best_plan;
+}
 
 
 GeneralSchedPlan Generalizer::tailHeadHeuristic(
   const SchedPlan& sched,
   const std::vector<float>& memory,
   const int steady_opt_step_upbound,
-  const int nworkers) {
+  const int nworkers, const int budget) {
 
     std::set<int> mids;
     for (auto blk : sched.allBlocks()) {
@@ -37,7 +204,7 @@ GeneralSchedPlan Generalizer::tailHeadHeuristic(
     }
     Plans steadies = Composer::stepOptimalDFS(
         tail_heads, steady_memory, true,
-        steady_opt_step_upbound, nworkers
+        steady_opt_step_upbound, nworkers, budget
     );
 
     GeneralSchedPlan gplan;

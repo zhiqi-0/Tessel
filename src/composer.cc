@@ -257,6 +257,9 @@ Plans Composer::stepOptimalBFS(std::vector<SchedPlan> micros, const std::vector<
 
 Plans Composer::stepOptimalDFS(Plans micros, const std::vector<float>& memory,
                                bool silence, int rstep, int nworkers, const long budget) {
+    if (nworkers != 1) {
+        throw std::runtime_error("DFS can only support nworkers = 1");
+    }
     const int ndevs = micros.at(0).nDevs();
     // remain_step_hash : current step
     std::unordered_map<std::string, int> explored;

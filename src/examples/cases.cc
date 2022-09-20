@@ -7,7 +7,7 @@
  * 
  * @copyright Copyright (c) 2022
  * 
- * ./build/cases --premise vshape --ndevs 4 --nmicros 4 --memory 4 --nworkers 1
+ * ./build/cases --premise vshape --ndevs 4 --nmicros 4 --memory 4 --nworkers 16
  * 
  */
 
@@ -16,32 +16,16 @@
 #include <iostream>
 #include <string>
 #include <functional>
-#include <chrono>
 
 #include <schedplan.h>
 #include <composer.h>
 #include <generalizer.h>
 
 #include <parser.h>
+#include <timer.h>
 
 
 typedef Plans (PremiseFunc)(int, int);
-
-
-class CpuTimer {
-
- public:
-    void start() { t1 = std::chrono::high_resolution_clock::now(); }
-    void stop() { t2 = std::chrono::high_resolution_clock::now(); }
-
-    int elapsed() {
-        // in millisecond
-        return std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-    }
-
- private:
-    std::chrono::high_resolution_clock::time_point t1, t2;
-};
 
 
 class Premise {
@@ -353,85 +337,20 @@ void search(std::function<PremiseFunc> premise,
             int ndevs, int nmicros, float dev_memory, 
             int nworkers, long budget) {
 
-    CpuTimer timer;
-
-    // std::vector<SchedPlan> micros = premise_vshape(ndevs, nmicros);
-    // std::vector<SchedPlan> micros = premise_chimera(ndevs, nmicros);
-    // std::vector<SchedPlan> micros = premise_interleave(ndevs, nmicros);
     std::vector<SchedPlan> micros = premise(ndevs, nmicros);
 
+    std::vector<float> memory(ndevs, dev_memory);
     for (int mid = 0; mid < nmicros; ++mid) {
         std::cout << "Premise Micro ID# " << mid << ":\n";
         std::cout << micros[mid] << std::endl;
     }
     // micros[0].to_json("micro1.json");
-    std::vector<float> memory(ndevs, dev_memory);
 
-    // step optimal search
-    timer.start();
-    std::vector<SchedPlan> opt_plans = Composer::stepOptimalDFS(
-        micros, memory, false, -1, nworkers, budget
-    );
-    timer.stop();
-    std::cout << "step-optimal search time: "
-              << float(timer.elapsed()) / 1000 
-              << " seconds" << std::endl;
+    GeneralSchedPlan best_plan = Generalizer::searchDFS(micros, memory, nworkers, budget);
+    float min_bubble_rate = best_plan.steady_bubble_rate();
 
-    if (opt_plans.size() == 0) {
-        std::cout << "no solution" << std::endl;
-    }
-    else {
-        std::cout << "one solution:\n" << opt_plans[0] << std::endl;
-    }
-    // for (auto& sched : opt_plans) { std::cout << sched << std::endl;};
-    // return
-
-    timer.start();
-
-    GeneralSchedPlan best_plan;
-    float min_bubble_rate = 1.0;
-    float min_steady_step = opt_plans[0].nSteps() * 2;
-    for (size_t idx = 0; idx < opt_plans.size(); ++idx) {
-        // prune technique to early stop for other plan
-        GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
-            opt_plans[idx], memory, min_steady_step - 1, nworkers
-        );
-        // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
-        //     opt_plans[idx], memory, min_steady_step - 1, nworkers
-        // );
-
-        if ((idx+1) % 10 == 0) {
-            std::cout << "searched " << idx + 1 << "/" << opt_plans.size() << " plans\n";
-        }
-
-        if (gsched.isEmpty()) {
-            gsched.destroyCreatedBlocks();
-            continue;
-        }
-
-        float bubble_rate = gsched.steady_bubble_rate();
-        if (bubble_rate < min_bubble_rate) {
-            min_bubble_rate = bubble_rate;
-            min_steady_step = gsched.getRBound() - gsched.getLBound();
-            std::cout << "find generalized plan with bubble rate: "
-                      << min_bubble_rate << std::endl;
-            std::cout << gsched << std::endl;
-            best_plan.destroyCreatedBlocks();
-            best_plan = gsched;
-        }
-        else {
-            gsched.destroyCreatedBlocks();
-        }
-        if (min_bubble_rate == 0) {
-            std::cout << "early stop as found 0-bubble plan\n";
-            break;
-        }
-    }
-
-    timer.stop();
     std::cout << "best bubble-rate generalized plan:\n" << best_plan << std::endl
-              << "bubble rate: " << min_bubble_rate << std::endl
-              << "Generalization time: " << float(timer.elapsed()) / 1000 << " seconds\n"; 
+              << "bubble rate: " << min_bubble_rate << std::endl;
 
     best_plan.to_json("general_plan.json");
 }
