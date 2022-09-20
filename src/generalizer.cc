@@ -37,41 +37,44 @@ GeneralSchedPlan Generalizer::searchDFS(
     float min_steady_step = opt_plans[0].nSteps() * 2;
 
     int nsearched = 0;
-    const int ncandidates = opt_plans.size();
+    int ncandidates = opt_plans.size();
     nworkers = nworkers < ncandidates ? nworkers : ncandidates;
+
     #pragma omp parallel num_threads(nworkers)
     {
         int tid = omp_get_thread_num();
-        int start = opt_plans.size() / nworkers * tid;
-        int stop = (tid == nworkers - 1) ? ncandidates : start + ncandidates / nworkers;
-    
+        int chunk_size = opt_plans.size() / nworkers;
+        int start = chunk_size * tid;
+        int stop = start + chunk_size;
+
         for (int idx = start; idx < stop; ++idx) {
             // use heuristic search
-            GeneralSchedPlan gsched = Generalizer::tailHeadHeuristic(
-                opt_plans[idx], memory, min_steady_step - 1, 1, budget
-            );
-            // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
-            //     opt_plans[idx], memory, min_steady_step - 1, nworkers
-            // );
-            if (gsched.isEmpty()) {
-                gsched.destroyCreatedBlocks();
-                continue;
+            GeneralSchedPlan gsched;
+            if (idx < int(opt_plans.size())) {
+                gsched = Generalizer::tailHeadHeuristic(
+                    opt_plans[idx], memory, min_steady_step - 1, 1, budget
+                );
+                // GeneralSchedPlan gsched = Generalizer::tightenHeuristic(
+                //     opt_plans[idx], memory, min_steady_step - 1, nworkers
+                // );
             }
-            float bubble_rate = gsched.steady_bubble_rate();
 
             #pragma omp critical
             {
-                if (bubble_rate < min_bubble_rate) {
-                    min_bubble_rate = bubble_rate;
-                    min_steady_step = gsched.getRBound() - gsched.getLBound();
-                    std::cout << "find generalized plan with bubble rate: "
-                              << min_bubble_rate << std::endl;
-                    std::cout << gsched << std::endl;
-                    best_plan.destroyCreatedBlocks();
-                    best_plan = gsched;
-                }
-                else {
-                    gsched.destroyCreatedBlocks();
+                if (!gsched.isEmpty()) {
+                    float bubble_rate = gsched.steady_bubble_rate();
+                    if (bubble_rate < min_bubble_rate) {
+                        min_bubble_rate = bubble_rate;
+                        min_steady_step = gsched.getRBound() - gsched.getLBound();
+                        std::cout << "find generalized plan with bubble rate: "
+                                  << min_bubble_rate << std::endl;
+                        std::cout << gsched << std::endl;
+                        best_plan.destroyCreatedBlocks();
+                        best_plan = gsched;
+                    }
+                    else {
+                        gsched.destroyCreatedBlocks();
+                    }
                 }
             }
 
