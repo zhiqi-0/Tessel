@@ -23,6 +23,7 @@ class SolverBase:
         self._nsteps: z3.ArithRef = None
         self._mem: List[z3.ArithRef] = [None] * ndevs
         self._solution: Optional[z3.z3.ModelRef] = None
+        self._solved = False
         self._solver = z3.Solver()
 
     @property
@@ -37,6 +38,10 @@ class SolverBase:
     def nsteps(self) -> z3.ArithRef:
         return self._nsteps
     
+    @property
+    def solved(self) -> bool:
+        return True
+    
     def device(self, block: Block) -> List[int]:
         assert block in self._blocks
         return self._block_devices[block]
@@ -46,6 +51,7 @@ class SolverBase:
         return self._block_steps[block]
     
     def add_block(self, block: Block, devs: List[int], step: int):
+        self._solved, self._solution = False, None
         self._block_devices[block] = devs
         start = z3.Int('blk' + str(len(self._block_devices)))
         end = start + block.span
@@ -68,12 +74,14 @@ class SolverBase:
         self._blocks.add(block)
 
     def add_dependency(self, blocks: List[Block]):
+        self._solved, self._solution = False, None
         for idx in range(len(blocks) - 1):
             pre, post = blocks[idx], blocks[idx+1]
             pre_t, post_t = self.step(pre), self.step(post)
             self._solver.add(pre_t + pre.span <= post_t)
 
     def add_micro_plan(self, micro: SchedPlan):
+        self._solved, self._solution = False, None
         for block in micro.all_blocks():
             step = micro.step(block)
             devs = micro.device(block)
@@ -107,18 +115,19 @@ class StepOptimalSolver(SolverBase):
     def __init__(self, ndevs: int) -> None:
         super().__init__(ndevs)
 
-    def time_optimal(self, memory: List[int]):
+    def time_optimal(self, memory: List[int], time: Optional[int] = None) -> Optional[int]:
         """
         Find step optimal plans
 
         @param memory List[int]: the memory constraint of each device
         """
+        self._solution = None
         print('memory constraints:', memory)
         self.init_peak_mem()
         for devid in range(self.ndevs):
             self._solver.add(self._mem[devid] <= memory[devid])
         # binary search
-        opt_upper_step = sum(blk.span for blk in self._blocks) * 2
+        opt_upper_step = sum(blk.span for blk in self._blocks) if time is None else time
         opt_lower_step = 0
         opt_step = opt_upper_step
         while opt_lower_step != opt_upper_step:
@@ -136,9 +145,11 @@ class StepOptimalSolver(SolverBase):
                 sys.stdout.flush()
                 opt_lower_step = try_step + 1
             self._solver.pop()
-        print(f'find step optimal sched plan {opt_step}')
+        if self._solution is not None:
+            print(f'find step optimal sched plan {opt_step}')
         sys.stdout.flush()
-        return opt_step
+        self._solved = True
+        return opt_step if self._solution is not None else None
     
     def solutions(self) -> SchedPlan:
         """
@@ -146,7 +157,7 @@ class StepOptimalSolver(SolverBase):
 
         @yield solution SchedPlan
         """
-        assert self._solution is not None, "Expected first call time_optimal"
+        assert self._solved, "Expected first call time_optimal"
         step = self._solution.eval(self._nsteps).as_long()
         self._solver.push()
         self._solver.add(self._nsteps == step)
