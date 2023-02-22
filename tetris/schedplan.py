@@ -40,6 +40,7 @@ class SchedPlan:
         self._block_steps: Dict[Block, int] = dict()
         self._step_blocks: Dict[int, List[Block]] = {0:[]}
         self._plans: List[List[Optional[Block]]] = [[] for _ in range(ndevs)]
+        self.split_steps = []
 
     @property
     def nsteps(self) -> int:
@@ -51,6 +52,17 @@ class SchedPlan:
 
     def all_blocks(self) -> Set[Block]:
         return self._blocks
+    
+    def chain_blocks(self) -> List[Block]:
+        """
+        sort all blocks by step from early to later
+        """
+        blocks = []
+        for step in range(self.nsteps):
+            for block in self.blocks(step):
+                blocks.append(block)
+        assert len(blocks) == len(self._blocks)
+        return blocks
 
     def add_block(self, block: Block, device: List[int], step: int):
         """
@@ -101,6 +113,8 @@ class SchedPlan:
         for devid in range(self.ndevs):
             step = 0
             while step < self.nsteps:
+                if step in self.split_steps:
+                    dscp += ' |'
                 have_block = False
                 for blk in self.blocks(step):
                     if devid in self.device(blk):
@@ -137,4 +151,14 @@ class SchedPlan:
                 device, start
             )
         return schedplan
+
+    @staticmethod
+    def concat(plans: List):
+        cplan = SchedPlan(plans[0].ndevs)
+        step_ofst = 0
+        for plan in plans:
+            for block in plan.all_blocks():
+                cplan.add_block(block, plan.device(block), plan.step(block) + step_ofst)
+            step_ofst += plan.nsteps
+        return cplan
 

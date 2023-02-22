@@ -1,5 +1,5 @@
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from tetris.schedplan import SchedPlan, Block
 
 
@@ -32,30 +32,37 @@ class MicroPicker:
                 _res.pop(-1)
     
     @staticmethod
-    def pick(micros: List[SchedPlan]) -> List[Tuple[Block, Devices]]:
+    def pick(micros: List[SchedPlan]) -> Tuple[List[Block], List[Block], List[Block], Dict[Block, Devices]]:
         """
         
-        @yield tuple of (block, devices)
+        @yield warmup blocks, repetend blocks, cooldown blocks, block2device mapping
         """
-
         nmicros = len(micros)
-        nblocks = len(micros[0].all_blocks())
+        # collect device mapping
+        block2device = {}
+        for micro in micros:
+            for block in micro.all_blocks():
+                block2device[block] = micro.device(block)
 
-        print(nblocks, nmicros)
         ref = micros[0]
-
+        blocks = ref.chain_blocks()
+    
         # TODO: support multi-branch
-        for mids in MicroPicker.iter_chain(nblocks, nmicros):
-            block_and_devs = []
+        for mids in MicroPicker.iter_chain(len(blocks), nmicros):
+            warmup, repetend, cooldown = [], [], []
             print(f'assigning mids: {mids}')
-            bidx = 0
-            for step in range(ref.nsteps):
-                ref_blocks = ref.blocks(step)
-                if len(ref_blocks) == 0: continue
-                assert len(ref_blocks) == 1
-                mid = mids[bidx]
-                blk = micros[mid].blocks(step)[0]
-                block_and_devs.append((blk, micros[mid].device(blk)))
-                bidx += 1
-            # print(blocks)
-            yield block_and_devs
+            # collect repetend blocks
+            for idx, (mid, block) in enumerate(zip(mids, blocks)):
+                blk = micros[mid].chain_blocks()[idx]
+                repetend.append(blk)
+            # collect warmup and cooldown blocks
+            for mid, micro in enumerate(micros):
+                for block in micro.all_blocks():
+                    if block in repetend: continue
+                    idx = micro.chain_blocks().index(block)
+                    if idx < mids.index(mid):
+                        warmup.append(block)
+                    else:
+                        cooldown.append(block)
+            print(f'warmup: {warmup}\nrepetend: {repetend}\ncooldown: {cooldown}')
+            yield warmup, repetend, cooldown, block2device

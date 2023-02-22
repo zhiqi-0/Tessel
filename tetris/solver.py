@@ -4,7 +4,7 @@ A solver based solution for scheduling plan
 python solver.py --premise vshape --nmicros 4 --ndevs 4 --memory 4
 """
 
-from typing import List, Optional, Set, Dict
+from typing import List, Optional, Set, Dict, Iterable
 import sys
 
 from tetris.schedplan import SchedPlan, Block
@@ -115,19 +115,21 @@ class StepOptimalSolver(SolverBase):
     def __init__(self, ndevs: int) -> None:
         super().__init__(ndevs)
 
-    def time_optimal(self, memory: List[int], time: Optional[int] = None) -> Optional[int]:
+    def time_optimal(self, memory: List[int], time: Optional[int] = None, silence = True) -> Optional[int]:
         """
         Find step optimal plans
 
         @param memory List[int]: the memory constraint of each device
         """
         self._solution = None
-        print('memory constraints:', memory)
+        if not silence:
+            print('memory constraints:', memory)
         self.init_peak_mem()
         for devid in range(self.ndevs):
             self._solver.add(self._mem[devid] <= memory[devid])
         # binary search
-        opt_upper_step = sum(blk.span for blk in self._blocks) if time is None else time
+        opt_upper_step = sum(blk.span for blk in self._blocks) + 1 \
+            if time is None else time + 1
         opt_lower_step = 0
         opt_step = opt_upper_step
         while opt_lower_step != opt_upper_step:
@@ -135,23 +137,26 @@ class StepOptimalSolver(SolverBase):
             self._solver.push()
             self._solver.add(self._nsteps == try_step)
             if self._solver.check() == z3.sat:
-                print(f'find sched plan of {try_step} steps')
+                if not silence:
+                    print(f'find sched plan of {try_step} steps')
                 sys.stdout.flush()
                 self._solution = self._solver.model()
                 opt_upper_step = try_step
                 opt_step = try_step
             else:
-                print(f'fail to find sched plan of {try_step} steps')
+                if not silence:
+                    print(f'fail to find sched plan of {try_step} steps')
                 sys.stdout.flush()
                 opt_lower_step = try_step + 1
             self._solver.pop()
         if self._solution is not None:
-            print(f'find step optimal sched plan {opt_step}')
+            if not silence:
+                print(f'find step optimal sched plan {opt_step}')
         sys.stdout.flush()
         self._solved = True
         return opt_step if self._solution is not None else None
     
-    def solutions(self) -> SchedPlan:
+    def solutions(self) -> Iterable[SchedPlan]:
         """
         iterate all possible solutions given the time-optimal solutions
 
