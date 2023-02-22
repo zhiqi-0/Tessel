@@ -8,11 +8,12 @@ from tetris.solver import StepOptimalSolver
 class Composer:
 
     @staticmethod
-    def compose(micros: List[SchedPlan], memory: List[int]):
+    def compose(micros: List[SchedPlan], memory: List[int]) -> List[SchedPlan]:
         assert len(micros) > 0
         assert all(micro.ndevs == micros[0].ndevs for micro in micros)
         ndevs = micros[0].ndevs
 
+        schedules = []
         nsteps = micros[0].nsteps
         for warmup_blks, repetend_blks, cooldown_blks, devices in MicroPicker.pick(micros):
             warmup_devs = [devices[blk] for blk in warmup_blks]
@@ -25,10 +26,11 @@ class Composer:
             mem = [memory[devid] - warmup_mem.get(devid, 0) for devid in range(ndevs)]
             repetend = Composer.construct(repetend_blks, repetend_devs, ndevs, mem, nsteps)
             if repetend is None: continue
+            
             # step 2: construct warmup
-            # TODO: setup memory
             warmup = Composer.construct(warmup_blks, warmup_devs, ndevs, memory)
             if warmup is None: continue
+            
             # step 3: construct cooldown
             mem = [memory[devid] - repetend_mem.get(devid, 0) for devid in range(ndevs)]
             cooldown = Composer.construct(cooldown_blks, cooldown_devs, ndevs, mem)
@@ -40,8 +42,13 @@ class Composer:
             print(schedule)
 
             # TODO: optimize this to identify real bubble rate
+            if repetend.nsteps < nsteps:
+                schedules = []
             nsteps = repetend.nsteps
             print(f'> setting repetend maximal nsteps: {nsteps}')
+            schedules.append(schedule)
+
+        return schedules
             
 
     @staticmethod

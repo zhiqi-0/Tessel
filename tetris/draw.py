@@ -4,10 +4,9 @@ Example usage:
 python -m tetris.draw --planfile plan.json --outfile plan.png
 """
 
-from typing import Dict, Set, Tuple, List, Optional
+from typing import Tuple, Optional
 from tetris.schedplan import SchedPlan, Block
 
-import json
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -15,7 +14,6 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import AutoMinorLocator
 
 import argparse
-
 
 
 class Painter:
@@ -33,10 +31,10 @@ class Painter:
         renderer = fig.canvas.get_renderer()
 
         # xaxis
-        ax.set_xlim((0, schedplan.nsteps-1))
+        ax.set_xlim((0, schedplan.nsteps))
         plt.xticks(
-            ticks=np.arange(0.5, schedplan.nsteps-0.5, 1.0, dtype=float),
-            labels=np.arange(1, schedplan.nsteps, 1, dtype=int)
+            ticks=np.arange(0.5, schedplan.nsteps+0.5, 1.0, dtype=float),
+            labels=np.arange(1, schedplan.nsteps+1, 1, dtype=int)
         )
         minor_locator = AutoMinorLocator(2)
         plt.gca().xaxis.set_minor_locator(minor_locator)
@@ -72,6 +70,9 @@ class Painter:
             devs = schedplan._block_devices[block]
             step = schedplan._block_steps[block]
             draw_block(block, (devs, step), fontsize)
+
+        for step in schedplan.split_steps:
+            plt.axvline(step, linewidth=8, color='red')
 
         # set fontsize to same
         fontsize = fontsize[0]
