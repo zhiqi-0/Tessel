@@ -1,16 +1,16 @@
 """
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
-    --premise vshape --ndevs 4 --nmicros 4 --memory 4
+    --premise vshape --ndevs 4 --nmicros 4 --memory 4 --save figures > figures/log
 """
 from typing import List
 import sys
 import time
 import argparse
+import os
 
 from tetris.schedplan import SchedPlan, Block
-from tetris.solver import StepOptimalSolver
-from tetris.repetend import MicroPicker
 from tetris.composer import Composer
+from tetris.draw import Painter
 
 
 FW='forward'
@@ -73,7 +73,7 @@ class Premise:
         return sched
 
     @staticmethod
-    def interleave(ndevs: int, nmicros: int) -> SchedPlan:
+    def interlace(ndevs: int, nmicros: int) -> SchedPlan:
         """
         f f   f         b   b b
         f   f f         b b   b
@@ -110,13 +110,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='comm primitive')
     parser.add_argument('--premise', type=str,
-                        choices=['vshape', 'interleave', 'mshape', 'chimera', 'alphafold', 'two_tower', 'custom'])
+                        choices=['vshape', 'interlace', 'mshape', 'chimera', 'alphafold', 'two_tower', 'custom'])
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
                         help='number of micro-batches')
     parser.add_argument('--memory', type=int,
                         help='memory limits')
+    parser.add_argument('--save', type=str, default=None,
+                        help='save searched schedule under a folder')
     args = parser.parse_args()
 
     print('============== Scheduling Solver ================')
@@ -130,45 +132,18 @@ if __name__ == '__main__':
     print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
     print(micros[0])
 
-    Composer.compose(micros, memory)
+    tic = time.time()
+    schedules = Composer.compose(micros, memory)
+    toc = time.time()
 
-    # nsteps = micros[0].nsteps
-    # for block_and_devs in MicroPicker.pick(micros):
-    #     solver = StepOptimalSolver(args.ndevs)
-    #     # add block inside solver
-    #     for block, devs in block_and_devs:
-    #         solver.add_block(block, devs, 0)
-    #     # setup dependency
-    #     blocks = [block_devs[0] for block_devs in block_and_devs]
-    #     for idx, blk1 in enumerate(blocks):
-    #         for blk2 in blocks[idx+1:]:
-    #             if blk2 in blk1.after:
-    #                 solver.add_dependency([blk1, blk2])
-    #     case_nsteps = solver.time_optimal(memory, nsteps)
-    #     if case_nsteps is not None:
-    #         nsteps = case_nsteps
-    #         print('find one solution:')
-    #         for schedplan in solver.solutions():
-    #             print(schedplan)
-    #             break
-    #     else:
-    #         print("Fail to find a smaller-step solution")
-        
-        # break
+    print('\n================================================')
+    print('search time: {:.2f} seconds'.format(toc-tic))
 
-
-    # step-optimal search
-    # solver = StepOptimalSolver(args.ndevs)
-    # for micro in micros: 
-    #     print('adding micro:')
-    #     print(micro)
-    #     solver.add_micro_plan(micro)
-    # tic = time.time()
-    # solver.time_optimal(memory)
-    # toc = time.time()
-    # print('search time for step optimal span: {:.2f} seconds'.format(toc-tic))
-    # 
-    # print('find one solution:')
-    # for schedplan in solver.solutions():
-    #     print(schedplan)
-    #     break
+    if args.save is not None:
+        for idx, schedule in enumerate(schedules):
+            # now = datetime.datetime.now()
+            now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
+            # now = f"{now.year}{now.month}{now.day}-{now.hour}{now.minute}"
+            Painter.visualize(
+                schedule,
+                os.path.join(args.save, f"{args.premise}-{idx}.{now}.png"))
