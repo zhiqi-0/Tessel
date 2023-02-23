@@ -42,7 +42,7 @@ class Composer:
             schedule.split_steps = [warmup.nsteps, warmup.nsteps + repetend.nsteps]
             print(schedule)
 
-            if nbubbles < case_nbubbles:
+            if case_nbubbles < nbubbles:
                 schedules = []
             nbubbles = case_nbubbles - 1
             schedules.append(schedule)
