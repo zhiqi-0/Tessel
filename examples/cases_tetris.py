@@ -140,10 +140,15 @@ if __name__ == '__main__':
     print('search time: {:.2f} seconds'.format(toc-tic))
 
     if args.save is not None:
-        for idx, schedule in enumerate(schedules):
-            # now = datetime.datetime.now()
-            now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
-            # now = f"{now.year}{now.month}{now.day}-{now.hour}{now.minute}"
+        now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
+        Painter.visualize(
+            micros[0],
+            os.path.join(args.save, f"{args.premise}-premise.{now}.png"))
+        repetends = [sched.extract(sched.split_steps[0], sched.split_steps[1]) for sched in schedules]
+        for idx, (schedule, repetend) in enumerate(zip(schedules, repetends)):
             Painter.visualize(
                 schedule,
-                os.path.join(args.save, f"{args.premise}-{idx}.{now}.png"))
+                os.path.join(args.save, f"{args.premise}-schedule-{idx}.{now}.png"))
+            Painter.visualize(
+                repetends[idx], 
+                os.path.join(args.save, f"{args.premise}-repetend-{idx}.{now}.png"))
