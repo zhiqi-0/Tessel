@@ -2,7 +2,7 @@ from typing import List, Tuple, Optional, Dict
 from tetris.schedplan import SchedPlan, Block
 
 from tetris.repetend import MicroPicker
-from tetris.solver import StepOptimalSolver
+from tetris.solver import StepOptimalSolver, BubbleOptimalSolver, SolverBase
 
 
 class Composer:
@@ -14,7 +14,7 @@ class Composer:
         ndevs = micros[0].ndevs
 
         schedules = []
-        nsteps = micros[0].nsteps
+        nbubbles = micros[0].nsteps
         for warmup_blks, repetend_blks, cooldown_blks, devices in MicroPicker.pick(micros):
             warmup_devs = [devices[blk] for blk in warmup_blks]
             repetend_devs = [devices[blk] for blk in repetend_blks]
@@ -24,16 +24,17 @@ class Composer:
             
             # step 1: construct a repetend
             mem = [memory[devid] - warmup_mem.get(devid, 0) for devid in range(ndevs)]
-            repetend = Composer.construct(repetend_blks, repetend_devs, ndevs, mem, nsteps)
+            repetend, case_nbubbles = Composer.construct(
+                repetend_blks, repetend_devs, ndevs, mem, nbubbles, optimizer=BubbleOptimalSolver)
             if repetend is None: continue
             
             # step 2: construct warmup
-            warmup = Composer.construct(warmup_blks, warmup_devs, ndevs, memory)
+            warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, memory)
             if warmup is None: continue
             
             # step 3: construct cooldown
             mem = [memory[devid] - repetend_mem.get(devid, 0) for devid in range(ndevs)]
-            cooldown = Composer.construct(cooldown_blks, cooldown_devs, ndevs, mem)
+            cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, ndevs, mem)
             if cooldown is None: continue
             
             print('find one solution:')
@@ -41,21 +42,23 @@ class Composer:
             schedule.split_steps = [warmup.nsteps, warmup.nsteps + repetend.nsteps]
             print(schedule)
 
-            # TODO: optimize this to identify real bubble rate
-            if repetend.nsteps < nsteps:
+            if nbubbles < case_nbubbles:
                 schedules = []
-            nsteps = repetend.nsteps
-            print(f'> setting repetend maximal nsteps: {nsteps}')
+            nbubbles = case_nbubbles - 1
             schedules.append(schedule)
 
+            if case_nbubbles == 0:
+                print('> early exit as find 0-bubble plans')
+                return schedules
+            print(f'> setting repetend maximal bubbles: {nbubbles}')
+
         return schedules
-            
 
     @staticmethod
     def construct(blocks: List[Block], devices: List[Tuple[int]],
                   ndevs: int, memory: int,
-                  upper_nsteps: Optional[int]=None) -> Optional[SchedPlan]:
-        solver = StepOptimalSolver(ndevs)
+                  upper_nsteps: Optional[int]=None, optimizer: Optional[SolverBase] = StepOptimalSolver) -> Tuple[Optional[SchedPlan], Optional[int]]:
+        solver = optimizer(ndevs)
         # step 1 add block inside solver
         for block, devs in zip(blocks, devices):
             solver.add_block(block, devs, 0)
@@ -66,13 +69,13 @@ class Composer:
                     # print(f'> add dependency: {blk1}-dev{devices[idx1]} -> {blk2}-dev{devices[idx2]}')
                     solver.add_dependency([blk1, blk2])
         # step 3 construct
-        nsteps = solver.time_optimal(memory, upper_nsteps)
+        nsteps = solver.solve(memory, upper_nsteps)
         if nsteps is None:
-            print("Fail to find a solution given step constraints\n")
-            return None
+            print("Fail to find a solution given boundary constraints\n")
+            return None, None
         for schedplan in solver.solutions():
-            assert schedplan.nsteps == nsteps
-            return schedplan
+            # assert schedplan.nsteps == nsteps
+            return schedplan, nsteps
 
     @staticmethod
     def memory(blocks: List[Block], devices: List[Tuple[int]] ) -> Dict[int, int]:

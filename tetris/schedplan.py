@@ -107,6 +107,13 @@ class SchedPlan:
     
     def device(self, block: Block) -> Tuple[int]:
         return self._block_devices[block]
+    
+    def extract(self, from_step: int, to_step: int):
+        sched = SchedPlan(self.ndevs)
+        for step in range(from_step, to_step):
+            for block in self.blocks(step):
+                sched.add_block(block, self.device(block), step-from_step)
+        return sched
 
     def __repr__(self) -> str:
         dscp = ''

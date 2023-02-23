@@ -1,5 +1,7 @@
 
 from typing import List, Tuple, Dict
+import itertools
+import math
 from tetris.schedplan import SchedPlan, Block
 
 
@@ -9,27 +11,17 @@ Devices = Tuple[int]
 class MicroPicker:
 
     @staticmethod
-    def iter_chain(nblocks: int, num_microbatches: int, _res = None):
-        if _res is None:
-            _res, nblocks = [num_microbatches - 1], nblocks-1
-        if nblocks == 0:
-            yield _res
-        else:
-            max_mid = min(num_microbatches - 1, _res[-1]) \
-                if len(_res) > 0 else num_microbatches - 1
-            # for m in range(max_mid, -1, -1):
-            #     _res.append(m)
-            #     for res in MicroPicker.iter_chain(nblocks-1, num_microbatches, _res):
-            #         yield res
-            #     _res.pop(-1)
-            mids = [max_mid, max_mid - 1] if max_mid - 1 > 0 else [max_mid]
-            if max_mid - 1 >= 0 and nblocks == max_mid + 1:
-                mids = [max_mid - 1]
-            for m in mids:
-                _res.append(m)
-                for res in MicroPicker.iter_chain(nblocks-1, num_microbatches, _res):
-                    yield res
-                _res.pop(-1)
+    def select(nblocks: int, nmicros: int):
+        for split in itertools.combinations(list(range(1, nblocks)), nmicros-1):
+            split = sorted(list(split))
+            mids = []
+            last_index = 0
+            for mid, index in enumerate(split):
+                mids += [nmicros-1-mid] * (index-last_index)
+                last_index = index
+            mids += [0] * (nblocks-last_index)
+            assert len(mids) == nblocks
+            yield mids
     
     @staticmethod
     def pick(micros: List[SchedPlan]) -> Tuple[List[Block], List[Block], List[Block], Dict[Block, Devices]]:
@@ -47,10 +39,11 @@ class MicroPicker:
         ref = micros[0]
         blocks = ref.chain_blocks()
     
+        nspace = math.comb(len(blocks)-1, nmicros-1)
         # TODO: support multi-branch
-        for mids in MicroPicker.iter_chain(len(blocks), nmicros):
+        for pidx, mids in enumerate(MicroPicker.select(len(blocks), nmicros)):
+            print(f'[{pidx}/{nspace}] assigning mids: {mids}')
             warmup, repetend, cooldown = [], [], []
-            print(f'assigning mids: {mids}')
             # collect repetend blocks
             for idx, (mid, block) in enumerate(zip(mids, blocks)):
                 blk = micros[mid].chain_blocks()[idx]
