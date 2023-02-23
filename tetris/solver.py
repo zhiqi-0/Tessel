@@ -23,6 +23,8 @@ class SolverBase:
         self._mem: List[z3.ArithRef] = [None] * ndevs
         self._solution: Optional[z3.z3.ModelRef] = None
         self._solved = False
+        # we experience extremely slow performance on z3.Optimize
+        # self._solver = z3.Optimize()
         self._solver = z3.Solver()
 
     @property
@@ -102,6 +104,16 @@ class SolverBase:
     def solve(self, var, upper_var: int, lower_var: int, silence = True) -> Optional[int]:
         self._solution = None
         upper, lower = upper_var, lower_var
+
+        # =============== use z3.Optimize() as self._solver ==============
+        # self._solver.add(z3.And(lower <= var, var < upper))
+        # self._solver.minimize(var)
+        # opt = None
+        # if self._solver.check() == z3.sat:
+        #     self._solution = self._solver.model()
+        #     opt = self._solution.eval(var).as_long()
+        # ================================================================
+
         opt = upper
         while lower < upper:
             try_var = (lower + upper) // 2
