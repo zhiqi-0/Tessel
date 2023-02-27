@@ -27,17 +27,16 @@ class Premise:
             f     b    
               f b      
         """
-        scheds = []
-        for mid in range(nmicros):
-            sched = SchedPlan(ndevs)
-            fblocks = [Block(mid, span=1, memory=1, btype=FW) for _ in range(ndevs)]
-            fdevs = [[devid] for devid in range(ndevs)]
-            bblocks = [Block(mid, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
-            bdevs = [[devid] for devid in range(ndevs)][::-1]
-            blocks = fblocks + bblocks
-            devs = fdevs + bdevs
-            sched.add_block_seq(blocks, devs)
-            scheds.append(sched)
+        sched = SchedPlan(ndevs)
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)][::-1]
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+
+        scheds = [sched.copy(mid) for mid in range(nmicros)]
         return scheds
 
     @staticmethod
@@ -48,29 +47,28 @@ class Premise:
         f     f f     b b     b
         f     f   f b   b     b
         """
-        scheds = []
-        for mid in range(nmicros):
-            sched = SchedPlan(ndevs)
-            # 
-            fblocks = [Block(mid, span=1, memory=1, btype=FW) for _ in range(ndevs)]
-            fdevs = [[devid] for devid in range(ndevs)]
-            bblocks = [Block(mid, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
-            bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
-            #
-            fblocks.insert(ndevs // 2, Block(mid, span=1, memory=1, btype=FW))
-            fdevs.insert(ndevs // 2, list(range(ndevs)))
-            bblocks.insert(ndevs // 2, Block(mid, span=2, memory=-1, btype=BW))
-            bdevs.insert(ndevs // 2, list(range(ndevs)))
-            # 
-            fblocks.insert(0, Block(mid, span=1, memory=1, btype=FW))
-            fdevs.insert(0, list(range(ndevs)))
-            bblocks.insert(len(bblocks), Block(mid, span=2, memory=-1, btype=BW))
-            bdevs.insert(len(bblocks), list(range(ndevs)))
+        sched = SchedPlan(ndevs)
+        # 
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        #
+        fblocks.insert(ndevs // 2, Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(ndevs // 2, list(range(ndevs)))
+        bblocks.insert(ndevs // 2, Block(0, span=2, memory=-1, btype=BW))
+        bdevs.insert(ndevs // 2, list(range(ndevs)))
+        #
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
+        bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
+        bdevs.insert(len(bblocks), list(range(ndevs)))
 
-            blocks = fblocks + bblocks
-            devs = fdevs + bdevs
-            sched.add_block_seq(blocks, devs)
-            scheds.append(sched)
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+
+        scheds = [sched.copy(mid) for mid in range(nmicros)]
         return scheds
     
     @staticmethod
@@ -81,24 +79,38 @@ class Premise:
         f     f     b    
         f       f b      
         """
-        scheds = []
-        for mid in range(nmicros):
-            sched = SchedPlan(ndevs)
+        sched = SchedPlan(ndevs)
 
-            fblocks = [Block(mid, span=1, memory=1, btype=FW) for _ in range(ndevs)]
-            fdevs = [[devid] for devid in range(ndevs)]
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
             
-            fblocks.insert(0, Block(mid, span=1, memory=0, btype=FW))
-            fdevs.insert(0, list(range(ndevs)))
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
             
-            bblocks = [Block(mid, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
-            bdevs = [[devid] for devid in range(ndevs)][::-1]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)][::-1]
             
-            blocks = fblocks + bblocks
-            devs = fdevs + bdevs
-            sched.add_block_seq(blocks, devs)
-            scheds.append(sched)
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+
+        scheds = [sched.copy(mid) for mid in range(nmicros)]
         return scheds
+    
+    @staticmethod
+    def yshape(ndevs: int, nmicros: int) -> SchedPlan:
+        """
+        f   f b   b
+          f f b b
+          f f b b
+        f   f b   b
+
+        f f         b b
+            f f b b
+            f f b b
+        f f         b b
+        """
+        pass
     
 
 if __name__ == '__main__':
@@ -142,7 +154,7 @@ if __name__ == '__main__':
         Painter.visualize(
             micros[0],
             os.path.join(args.save, f"{args.premise}-premise.{now}.png"))
-        repetends = [sched.extract(sched.split_steps[0], sched.split_steps[1]) for sched in schedules]
+        repetends = [sched.extract(sched.repetend[0], sched.repetend[1]) for sched in schedules]
         for idx, (schedule, repetend) in enumerate(zip(schedules, repetends)):
             Painter.visualize(
                 schedule,
