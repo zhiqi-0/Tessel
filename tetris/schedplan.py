@@ -1,24 +1,26 @@
 from typing import Dict, Set, Tuple, List, Optional
-
 import json
-import numpy as np
 
 import more_itertools
 
-import argparse
+
+StartEnd = Tuple[int, int]
 
 
 class Block:
 
-    def __init__(self, mid: int, span: int, memory: float, btype: str):
+    def __init__(self, mid: int, span: int, memory: float, btype: str, _gid=None):
         assert span > 0
-        self.mid = mid
+        # micro-batch index
+        self.mid: int = mid
         self.span = span
         self.memory = memory
         assert btype in ('forward', 'backward')
         self.btype = btype
         self.before = set()
         self.after = set()
+        # sub-graph index
+        self.gid: Optional[int] = _gid
 
     @staticmethod
     def make_dependency(prev, next):
@@ -40,7 +42,8 @@ class SchedPlan:
         self._block_steps: Dict[Block, int] = dict()
         self._step_blocks: Dict[int, List[Block]] = {0:[]}
         self._plans: List[List[Optional[Block]]] = [[] for _ in range(ndevs)]
-        self.split_steps = []
+        # repetend start step and end step
+        self.repetend: Optional[StartEnd] = None
 
     @property
     def nsteps(self) -> int:
@@ -115,12 +118,30 @@ class SchedPlan:
                 sched.add_block(block, self.device(block), step-from_step)
         return sched
 
+    def copy(self, mid_offset: Optional[int] = 0):
+        """
+        Copy the schedule plan and create the block with increased `mid_offset`
+        """
+        blks: Dict[Block, Block] = {}
+        def new(block: Block):
+            return blks.setdefault(
+                block, Block(block.mid+mid_offset, block.span, block.memory, block.btype, block.gid))
+
+        sched = SchedPlan(self.ndevs)
+        for block in self._blocks:
+            blk = new(block)
+            sched.add_block(blk, self.device(block), self.step(block))
+            # set dependency
+            blk.before = set(new(bblock) for bblock in block.before)
+            blk.after = set(new(ablock) for ablock in block.after)
+        return sched
+
     def __repr__(self) -> str:
         dscp = ''
         for devid in range(self.ndevs):
             step = 0
             while step < self.nsteps:
-                if step in self.split_steps:
+                if self.repetend is not None and step in self.repetend:
                     dscp += ' |'
                 have_block = False
                 for blk in self.blocks(step):
@@ -150,11 +171,12 @@ class SchedPlan:
             span = block['span']
             memory = block['memory']
             btype = block['btype']
+            gid = block.get('gid', None)
             # schedule plan position
             start = block['step']
             device: List[int] = block['device']
             schedplan.add_block(
-                Block(mid, span, memory, btype),
+                Block(mid, span, memory, btype, gid),
                 device, start
             )
         return schedplan

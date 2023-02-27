@@ -39,7 +39,7 @@ class Composer:
             
             print('find one solution:')
             schedule = SchedPlan.concat([warmup, repetend, cooldown])
-            schedule.split_steps = [warmup.nsteps, warmup.nsteps + repetend.nsteps]
+            schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
             print(schedule)
 
             if case_nbubbles < nbubbles:
@@ -57,7 +57,7 @@ class Composer:
     @staticmethod
     def construct(blocks: List[Block], devices: List[Tuple[int]],
                   ndevs: int, memory: int,
-                  upper_nsteps: Optional[int]=None, optimizer: Optional[SolverBase] = StepOptimalSolver) -> Tuple[Optional[SchedPlan], Optional[int]]:
+                  upper: Optional[int]=None, optimizer: Optional[SolverBase] = StepOptimalSolver) -> Tuple[Optional[SchedPlan], Optional[int]]:
         solver = optimizer(ndevs)
         # step 1 add block inside solver
         for block, devs in zip(blocks, devices):
@@ -69,13 +69,13 @@ class Composer:
                     # print(f'> add dependency: {blk1}-dev{devices[idx1]} -> {blk2}-dev{devices[idx2]}')
                     solver.add_dependency([blk1, blk2])
         # step 3 construct
-        nsteps = solver.solve(memory, upper_nsteps)
-        if nsteps is None:
-            print("Fail to find a solution given boundary constraints\n")
+        lowest = solver.solve(memory, upper)
+        if lowest is None:
+            print(f"Fail to find a solution given boundary constraints (upper={upper})\n")
             return None, None
         for schedplan in solver.solutions():
             # assert schedplan.nsteps == nsteps
-            return schedplan, nsteps
+            return schedplan, lowest
 
     @staticmethod
     def memory(blocks: List[Block], devices: List[Tuple[int]] ) -> Dict[int, int]:

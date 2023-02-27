@@ -71,8 +71,9 @@ class Painter:
             step = schedplan._block_steps[block]
             draw_block(block, (devs, step), fontsize)
 
-        for step in schedplan.split_steps:
-            plt.axvline(step, linewidth=8, color='red')
+        if schedplan.repetend is not None:
+            for step in schedplan.repetend:
+                plt.axvline(step, linewidth=8, color='red')
 
         # set fontsize to same
         fontsize = fontsize[0]
