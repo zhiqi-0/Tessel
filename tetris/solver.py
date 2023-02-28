@@ -6,6 +6,7 @@ python solver.py --premise vshape --nmicros 4 --ndevs 4 --memory 4
 
 from typing import List, Optional, Set, Dict, Iterable
 import sys
+import more_itertools
 
 from tetris.schedplan import SchedPlan, Block
 
@@ -44,7 +45,7 @@ class SolverBase:
         return self._block_devices[block]
 
     def step(self, block: Block) -> z3.ArithRef:
-        assert block in self._blocks
+        assert block in self._blocks, f"{block} not in the solver scope"
         return self._block_steps[block]
     
     def add_block(self, block: Block, devs: List[int], step: int):
@@ -100,6 +101,19 @@ class SolverBase:
                 peak = z3.If(curr > peak, curr, peak)
             peak_mem_per_dev.append(peak)
         self._mem = peak_mem_per_dev
+
+    def mono_mid_constraints(self):
+        """Same subgraph should be executed in order of growing micro-batch index        
+        """
+        gid_blocks: Dict[int, List[Block]] = {}
+        for block in self._blocks:
+            if block.gid is None: continue
+            gid_blocks.setdefault(block.gid, []).append(block)
+        for blocks in gid_blocks.values():
+            blocks = sorted(blocks, key=lambda blk: blk.mid)
+            if len(blocks) <= 1: continue
+            for blk1, blk2 in more_itertools.windowed(blocks, 2):
+                self._solver.add(self.step(blk1) < self.step(blk2))
 
     def solve(self, var, upper_var: int, lower_var: int, silence = True) -> Optional[int]:
         self._solution = None
@@ -181,6 +195,7 @@ class StepOptimalSolver(SolverBase):
 
         @param memory List[int]: the memory constraint of each device
         """
+        self.mono_mid_constraints()
         self._solution = None
         if not silence: print('memory constraints:', memory)
         self.init_peak_mem()
@@ -247,6 +262,7 @@ class BubbleOptimalSolver(SolverBase):
             self._solver.add(z3.If(step < maxstep, have_block, True))
 
     def solve(self, memory: List[int], upper_nbubbles: Optional[int] = None, silence=True) -> Optional[int]:
+        self.mono_mid_constraints()
         # init memory
         if not silence: print('memory constraints:', memory)
         self.init_peak_mem()
