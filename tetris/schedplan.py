@@ -5,6 +5,7 @@ import more_itertools
 
 
 StartEnd = Tuple[int, int]
+Devices = Tuple[int, ...]
 
 
 class Block:
@@ -68,9 +69,16 @@ class SchedPlan:
         return blocks
 
     def add_block(self, block: Block, device: List[int], step: int):
+        """Add a block into schedule plan. If the block is already inserted
+        inside the scheduling plan, the block must have same step and device.
         """
-        Add a block into schedule plan
-        """
+        if block in self._blocks:
+            assert self.step(block) == step and tuple(self.device(block)) == tuple(device), (
+                f"Repeated adding a block but has different device and starting step setup:\n"
+                f"Try to add   : {block}-{device} on step {step}\n"
+                f"Already exist: {block}-{self.device(block)} on step {step}"
+            )
+            return
         maxstep = step + block.span
         if maxstep > self._nsteps:
             for devplan in self._plans:
@@ -84,21 +92,28 @@ class SchedPlan:
         self._step_blocks.setdefault(step, []).append(block)
         for devid in device:
             for t in range(step, step + block.span):
-                assert self._plans[devid][t] is None, f"Conflict block add on device {devid} at step {step}"
+                assert self._plans[devid][t] is None, f"Conflict block {block}-{device} add on device {devid} at step {step}"
                 self._plans[devid][t] = block
 
-    def add_block_seq(self, blocks: List[Block], devices: List[Tuple[int]]):
+    def add_block_seq(self, blocks: List[Optional[Block]], devices: List[Optional[Devices]]):
         """
         Add a sequence of blocks into schedule plan
 
+        The None in blocks indicates an empty step, which will not place block
+
         This assumes the blocks are dependent one after another.
         This will add blocks starting from time step 0.
+
+        @param blocks List[Optional[Block]]
+        @param devices List[Optional[Devices]]
         """
         assert len(blocks) == len(devices)
         step = 0
         for block, devs in zip(blocks, devices):
-            self.add_block(block, devs, step)
-            step += block.span
+            if block is not None:
+                self.add_block(block, devs, step)
+            step += (block.span if block is not None else 1)
+        blocks = [blk for blk in blocks if blk is not None]
         for blk1, blk2 in more_itertools.windowed(blocks, 2):
             Block.make_dependency(blk1, blk2)
 

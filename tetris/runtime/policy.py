@@ -35,7 +35,7 @@ def schedule(graph: IRGraph, tsched: Union[str, TSched], num_microbatches: int, 
     for step in range(rstart):
         tblocks = tsched.blocks(step)
         for tblock in tblocks:
-            csched.add_segment(blk2seg[tblock.gid], tblock.mid, step)
+            csched.add_segment(blk2seg[tblock.gid], tblock.mid, step, tblock.span)
 
     # steady
     rspan = rend - rstart
@@ -43,17 +43,15 @@ def schedule(graph: IRGraph, tsched: Union[str, TSched], num_microbatches: int, 
         for step in range(rstart, rend):
             tblocks = tsched.blocks(step)
             for tblock in tblocks:
-                # print(f'adding segment {tblock}-{tsched.device(tblock)}, mid: {tblock.mid + ofst} to step {step + rspan * ofst}')
-                endtime = step + tblock.span - 1
                 csched.add_segment(
-                    blk2seg[tblock.gid], tblock.mid + ofst, endtime + rspan * ofst)
+                    blk2seg[tblock.gid], tblock.mid + ofst, step + rspan * ofst, tblock.span)
     
     # cooldown
     ofst = num_microbatches - nmicros
     for step in range(rend, tsched.nsteps):
         tblocks = tsched.blocks(step)
         for tblock in tblocks:
-            csched.add_segment(blk2seg[tblock.gid], tblock.mid + ofst, step + rspan * ofst)
+            csched.add_segment(blk2seg[tblock.gid], tblock.mid + ofst, step + rspan * ofst, tblock.span)
 
     csched.finish()
 
@@ -83,13 +81,19 @@ def policy(graph: IRGraph, resource,
         "Premise should call graph.blocking() or graph.staging()"
     
     # replicate dataloader to all devices
-    for dl in graph.select(ntype=IRDataOperation):
-        if len(dl.device) > 0: continue 
-        dls = graph.replicate(dl, resource.ngpus)
-        for devid, dl in enumerate(dls):
-            graph.assign(dl, devid)
+    dls = graph.select(ntype=IRDataOperation)
+    assert len(dls) == 1, f"Only consider one dataloader in IRGraph"
+    dl = dls[0]
+    dl_devices = set()
+    for segment in graph.select(ntype=IRSegment, flatten=False):
+        if graph.depends(dl, segment):
+            dl_devices.update(segment.device)
+    dl_devices = sorted(dl_devices)
+    dls = graph.replicate(dl, len(dl_devices))
+    for devid, dl in zip(dl_devices, dls):
+        graph.assign(dl, devid)
 
-    print(graph.extra_repr())
+    # print(graph.extra_repr())
 
     # assign block sub-graph index
     for idx, block in enumerate(micro.chain_blocks()):
@@ -109,7 +113,7 @@ def policy(graph: IRGraph, resource,
     tsched = schedplans[0]
 
     csched = schedule(graph, tsched, num_microbatches, block2seg)
-    print(csched)
+    print(f'> {csched}')
 
     if save_dir is not None:
         now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
