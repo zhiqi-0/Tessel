@@ -1,8 +1,16 @@
 """
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
-    --premise vshape --ndevs 4 --nmicros 4 --memory 4 --save figures > figures/log
+    --premise vshape --ndevs 4 --nmicros 4 --memory 4 --save figures \
+    > figures/vshape-4dev-4micro-4mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise interlace --ndevs 4 --nmicros 4 --memory 10 --save figures \
+    > figures/interlace-4dev-4micro-10mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise finetune --ndevs 4 --nmicros 4 --memory 10 --save figures \
+    > figures/finetune-4dev-4micro-10mem.log
 """
-from typing import List
 import sys
 import time
 import argparse
@@ -20,7 +28,7 @@ BW='backward'
 class Premise:
 
     @staticmethod
-    def vshape(ndevs: int, nmicros: int) -> List[SchedPlan]:
+    def vshape(ndevs: int) -> SchedPlan:
         """
         f             b
           f         b  
@@ -35,12 +43,10 @@ class Premise:
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
-
-        scheds = [sched.copy(mid) for mid in range(nmicros)]
-        return scheds
+        return sched
 
     @staticmethod
-    def interlace(ndevs: int, nmicros: int) -> SchedPlan:
+    def interlace(ndevs: int) -> SchedPlan:
         """
         f f   f         b   b b
         f   f f         b b   b
@@ -67,12 +73,10 @@ class Premise:
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
-
-        scheds = [sched.copy(mid) for mid in range(nmicros)]
-        return scheds
+        return sched
     
     @staticmethod
-    def finetune(ndevs: int, nmicros: int) -> SchedPlan:
+    def finetune(ndevs: int) -> SchedPlan:
         """
         f f             b
         f   f         b  
@@ -93,12 +97,10 @@ class Premise:
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
-
-        scheds = [sched.copy(mid) for mid in range(nmicros)]
-        return scheds
+        return sched
     
     @staticmethod
-    def yshape(ndevs: int, nmicros: int) -> SchedPlan:
+    def yshape(ndevs: int) -> SchedPlan:
         """
         f   f b   b
           f f b b
@@ -133,7 +135,11 @@ if __name__ == '__main__':
     sys.stdout.flush()
 
     premise = getattr(Premise, args.premise)
-    micros = premise(args.ndevs, args.nmicros)
+    micro: SchedPlan = premise(args.ndevs)
+    for gid, blk in enumerate(micro.chain_blocks()):
+        blk.gid = gid
+
+    micros = [micro.copy(mid) for mid in range(args.nmicros)]
     memory = [args.memory] * args.ndevs
 
     print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
