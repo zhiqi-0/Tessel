@@ -10,6 +10,10 @@ PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     > figures/chimera-4dev-3micro-4mem.log
 
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise mshape --ndevs 4 --nmicros 4 --memory 8 --save figures \
+    > figures/mshape-4dev-3micro-8mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     --premise interlace_s2s --ndevs 4 --nmicros 4 --memory 10 --save figures \
     > figures/interlace_s2s-4dev-4micro-10mem.log
 
@@ -144,6 +148,31 @@ class Premise:
         return sched
     
     @staticmethod
+    def mshape(ndevs: int) -> SchedPlan:
+        """
+        f f             b b
+        f   f         b   b
+        f     f     b     b
+        f       f b       b
+        """
+        sched = SchedPlan(ndevs)
+        # 
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        #
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
+        bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
+        bdevs.insert(len(bblocks), list(range(ndevs)))
+
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
+    
+    @staticmethod
     def two_tower(ndevs: int) -> SchedPlan:
         """
         f   f b-b b-b
@@ -222,8 +251,7 @@ class Premise:
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Tetris Cases')
-    parser.add_argument('--premise', type=str,
-                        choices=['vshape', 'chimera', 'interlace_s2s', 'interlace_mlm', 'finetune', 'two_tower'])
+    parser.add_argument('--premise', type=str)
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
