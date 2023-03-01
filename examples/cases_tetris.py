@@ -1,7 +1,13 @@
 """
+mkdir -p figures
+
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     --premise vshape --ndevs 4 --nmicros 4 --memory 4 --save figures \
     > figures/vshape-4dev-4micro-4mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise chimera --ndevs 4 --nmicros 3 --memory 4 --save figures \
+    > figures/chimera-4dev-3micro-4mem.log
 
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     --premise interlace_s2s --ndevs 4 --nmicros 4 --memory 10 --save figures \
@@ -47,6 +53,34 @@ class Premise:
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
+        return sched
+
+    @staticmethod
+    def chimera(ndevs: int) -> SchedPlan:
+        """
+        f     f b     b
+          f f     b b  
+          f f     b b  
+        f     f b     b
+        """
+        sched = SchedPlan(ndevs)
+        # v
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)][::-1]
+        vblocks = fblocks + bblocks
+        vdevs = fdevs + bdevs
+        # ^
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)][::-1]
+        bblocks = [Block(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)]
+        rvblocks = fblocks + bblocks
+        rvdevs = fdevs + bdevs
+
+        sched.add_block_seq(vblocks, vdevs)
+        sched.add_block_seq(rvblocks, rvdevs)
         return sched
 
     @staticmethod
@@ -189,7 +223,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Tetris Cases')
     parser.add_argument('--premise', type=str,
-                        choices=['vshape', 'interlace_s2s', 'interlace_mlm', 'finetune', 'two_tower'])
+                        choices=['vshape', 'chimera', 'interlace_s2s', 'interlace_mlm', 'finetune', 'two_tower'])
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
