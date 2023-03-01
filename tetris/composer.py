@@ -14,7 +14,7 @@ class Composer:
         ndevs = micros[0].ndevs
 
         schedules = []
-        nbubbles = micros[0].nsteps
+        nbubbles = micros[0].nsteps + 1
         for warmup_blks, repetend_blks, cooldown_blks, devices in MicroPicker.pick(micros):
             warmup_devs = [devices[blk] for blk in warmup_blks]
             repetend_devs = [devices[blk] for blk in repetend_blks]
@@ -44,7 +44,7 @@ class Composer:
 
             if case_nbubbles < nbubbles:
                 schedules = []
-            nbubbles = case_nbubbles - 1
+            nbubbles = case_nbubbles
             schedules.append(schedule)
 
             if case_nbubbles == 0:
@@ -71,7 +71,7 @@ class Composer:
         # step 3 construct
         lowest = solver.solve(memory, upper)
         if lowest is None:
-            print(f"Fail to find a solution given boundary constraints (upper={upper})\n")
+            print(f"Fail to find a solution given boundary constraints [upper(unreachable)={upper}]\n")
             return None, None
         for schedplan in solver.solutions():
             # assert schedplan.nsteps == nsteps

@@ -138,6 +138,7 @@ class SolverBase:
                 self._solver.add(self.step(blk1) < self.step(blk2))
 
     def solve(self, var, upper_var: int, lower_var: int, silence = True) -> Optional[int]:
+        """Find lowest value for var given boundary of [upper_var, lower_var)"""
         self._solution = None
         upper, lower = upper_var, lower_var
 
@@ -212,8 +213,7 @@ class StepOptimalSolver(SolverBase):
             self._nsteps = z3.If(end > self._nsteps, end, self._nsteps)
 
     def solve(self, memory: List[int], upper_time: Optional[int] = None, silence = True) -> Optional[int]:
-        """
-        Find step optimal plans
+        """Find step optimal plans given the time constraints of [0, upper_time-1]
 
         @param memory List[int]: the memory constraint of each device
         """
@@ -225,7 +225,7 @@ class StepOptimalSolver(SolverBase):
             self._solver.add(self._mem[devid] <= memory[devid])
 
         self.init_nsteps()
-        upper = upper_time + 1 if upper_time is not None \
+        upper = upper_time if upper_time is not None \
             else sum(blk.span for blk in self._blocks) + 1
         self._opt = super().solve(self._nsteps, upper, 0, silence)
         return self._opt
@@ -307,6 +307,9 @@ class BubbleOptimalSolver(SolverBase):
             self._solver.add(z3.If(step < maxstep, have_block, True))
 
     def solve(self, memory: List[int], upper_nbubbles: Optional[int] = None, silence=True) -> Optional[int]:
+        """
+        Find the lowest bubble given the bubble range constraints [0, upper_nbubbles-1]
+        """
         self.mono_mid_constraints()
         # init memory
         if not silence: print('memory constraints:', memory)
@@ -316,7 +319,7 @@ class BubbleOptimalSolver(SolverBase):
         
         # init bubble
         self.init_bubble()
-        upper_nbubbles = sum(block.span for block in self._blocks) \
+        upper_nbubbles = sum(block.span for block in self._blocks) + 1 \
             if upper_nbubbles is None else upper_nbubbles
 
         # stride the plan
