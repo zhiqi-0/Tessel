@@ -22,39 +22,14 @@ def schedule(graph: IRGraph, tsched: Union[str, TSched], num_microbatches: int, 
     @return schedplan CSched
     """
     tsched: TSched = tsched if isinstance(tsched, TSched) else TSched.load(tsched)
-    mids = set(tblk.mid for tblk in tsched.all_blocks())
-    assert len(mids) == max(mids) + 1, f"Microbatch index should be consecutive"
-    nmicros = max(mids) + 1
-
+    # unroll the plan
+    tsched = tsched.unroll(num_microbatches)
     csched = CSched(graph, num_microbatches)
-
-    tsched.repetend = (tsched.nsteps, tsched.nsteps) if tsched.repetend is None else tsched.repetend
-    rstart, rend = tsched.repetend
-
-    # warmup
-    for step in range(rstart):
+    for step in range(tsched.nsteps):
         tblocks = tsched.blocks(step)
         for tblock in tblocks:
             csched.add_segment(blk2seg[tblock.gid], tblock.mid, step, tblock.span)
-
-    # steady
-    rspan = rend - rstart
-    for ofst in range(num_microbatches-nmicros+1):
-        for step in range(rstart, rend):
-            tblocks = tsched.blocks(step)
-            for tblock in tblocks:
-                csched.add_segment(
-                    blk2seg[tblock.gid], tblock.mid + ofst, step + rspan * ofst, tblock.span)
-    
-    # cooldown
-    ofst = num_microbatches - nmicros
-    for step in range(rend, tsched.nsteps):
-        tblocks = tsched.blocks(step)
-        for tblock in tblocks:
-            csched.add_segment(blk2seg[tblock.gid], tblock.mid + ofst, step + rspan * ofst, tblock.span)
-
     csched.finish()
-
     return csched
 
 

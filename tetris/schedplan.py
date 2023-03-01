@@ -132,10 +132,104 @@ class SchedPlan:
             for block in self.blocks(step):
                 sched.add_block(block, self.device(block), step-from_step)
         return sched
+    
+    def unroll(self, nmicros: int):
+        """Unroll repetend to `nmicros` microbatches
+
+        @note the new blocks in unrolled schedule are not set
+        with any dependency.
+        
+        @param nmicros int: numbe of microbatches
+        @return unrolled_plan SchedPlan: a new unrolled schedule plan
+        """
+        assert self.repetend is not None
+        rstart, rend = self.repetend
+        # already existed number of microbatches
+        mids = set(blk.mid for blk in self._blocks)
+        assert len(mids) == max(mids) + 1, f"Microbatch index should be consecutive"
+        nmids = len(mids)
+        assert nmicros >= nmids, \
+            f"Unroll to nmicros ({nmicros}) smaller than num-microbatches that are already in schedule ({nmids})"
+
+        all_blocks: Dict[Tuple[int, int], Block] = {}
+        for blk in self._blocks:
+            assert blk.gid is not None
+            all_blocks[(blk.gid, blk.mid)] = blk
+    
+        def get_block(mid: int, gid: int) -> Block:
+            ref = all_blocks[(gid, 0)]
+            return all_blocks.setdefault(
+                (gid, mid), Block(mid, ref.span ,ref.memory, ref.btype, gid))
+
+        in_repetend = lambda blk: rstart <= self.step(blk) and self.step(blk) < rend
+
+        # get repetend offset
+        roffset = 0
+        dev_span = []
+        for devid in range(self.ndevs):
+            blocks = [blk for blk in self._blocks if devid in self.device(blk)]
+            blocks = [blk for blk in blocks if in_repetend(blk)]
+            maxstep = max(self.step(blk) + blk.span for blk in blocks)
+            minstep = min(self.step(blk) for blk in blocks)
+            dev_span.append(maxstep - minstep)
+
+            ofst = 0
+            for blk in blocks:
+                # after blocks
+                ablocks = list(blk.after)
+                keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
+                ablocks = [get_block(*key) for key in keys]
+                ablocks = [blk for blk in ablocks if blk in self._blocks]
+                astarts = [self.step(blk) for blk in ablocks if in_repetend(blk)]
+                if len(astarts) != 0:
+                    min_start = min(astarts) - maxstep
+                    ofst = max((ofst, min_start))
+                # before blocks
+                bblocks = list(blk.before)
+                keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
+                bblocks = [get_block(*key) for key in keys]
+                bblocks = [blk for blk in bblocks if blk in self._blocks]
+                bends = [self.step(blk) + blk.span for blk in bblocks if in_repetend(blk)]
+                if len(bends) != 0:
+                    min_start = max(bends) - maxstep
+                    ofst = max(ofst, min_start)
+            roffset = max(ofst, roffset)
+
+        unrolled_plan = SchedPlan(self.ndevs)
+
+        # warmup
+        for step in range(rstart):
+            blocks = self.blocks(step)
+            for block in blocks:
+                unrolled_plan.add_block(block, self.device(block), step)
+        
+        # steady
+        rspan = max(dev_span)
+        for mid_ofst in range(nmicros-nmids+1):
+            for step in range(rstart, rend):
+                for blk in self.blocks(step):
+                    rblk = get_block(blk.mid + mid_ofst, blk.gid)
+                    unrolled_plan.add_block(
+                        rblk, self.device(blk),
+                        step + (rspan + roffset) * mid_ofst
+                    )
+
+        # cooldown
+        mid_ofst = nmicros - nmids
+        for step in range(rend, self.nsteps):
+            for blk in self.blocks(step):
+                unrolled_plan.add_block(
+                    get_block(blk.mid + mid_ofst, blk.gid), 
+                    self.device(blk),
+                    step + (rspan + roffset) * mid_ofst
+                )
+        
+        unrolled_plan.repetend = (rstart, rend + (rspan + roffset) * mid_ofst)
+        return unrolled_plan
 
     def copy(self, mid_offset: Optional[int] = 0):
-        """
-        Copy the schedule plan and create the block with increased `mid_offset`
+        """Copy the schedule plan and create the block with 
+        increased `mid_offset`
         """
         blks: Dict[Block, Block] = {}
         def new(block: Block):
