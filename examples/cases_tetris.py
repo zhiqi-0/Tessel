@@ -24,6 +24,10 @@ PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     --premise finetune --ndevs 4 --nmicros 4 --memory 10 --save figures \
     > figures/finetune-4dev-4micro-10mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise two_tower_infer --ndevs 4 --nmicros 2 --memory 4 --save figures \
+    > figures/two_tower_infer-4dev-2micro-4mem.log
 """
 import sys
 import time
@@ -192,7 +196,7 @@ class Premise:
         bdevs = [list(range(ndevs1))]
         branch1 = fbranch1 + [None] * (ndevs-ndevs1-1) + loss + bbranch1
         branch1_devs = fdevs + [None] * (ndevs-ndevs1-1) + loss_devs + bdevs
-
+    
         # vshape
         ndevs2 = ndevs - ndevs1
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs2)]
@@ -201,11 +205,40 @@ class Premise:
         bdevs = [[devid+ndevs1] for devid in range(ndevs2)][::-1]
         branch2 = fblocks + loss + bblocks
         branch2_devs = fdevs + loss_devs + bdevs
-
+    
         print(branch1)
         print(branch2)
         sched.add_block_seq(branch2, branch2_devs)
         sched.add_block_seq(branch1, branch1_devs)
+        return sched
+
+    @staticmethod
+    def two_tower_infer(ndevs: int) -> SchedPlan:
+        """
+        f   f
+          f f
+          f f
+        f   f 
+        """
+        sched = SchedPlan(ndevs)
+        # full spmd on loss:
+        loss = [Block(0, span=1, memory=0, btype=FW)]
+        loss_devs = [list(range(ndevs))]
+        # vshape
+        ndevs1 = ndevs // 2
+        fbranch1 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs1)]
+        fdevs = [[devid] for devid in range(ndevs1)]
+        branch1 = fbranch1 + loss
+        branch1_devs = fdevs + loss_devs
+        # ^shape
+        ndevs2 = ndevs - ndevs1
+        fblocks = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs2)]
+        fdevs = [[devid+ndevs1] for devid in range(ndevs2)][::-1]
+        branch2 = fblocks + loss
+        branch2_devs = fdevs + loss_devs
+    
+        sched.add_block_seq(branch1, branch1_devs)
+        sched.add_block_seq(branch2, branch2_devs)
         return sched
 
     @staticmethod
