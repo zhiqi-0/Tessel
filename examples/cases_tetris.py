@@ -4,8 +4,12 @@ PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     > figures/vshape-4dev-4micro-4mem.log
 
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
-    --premise interlace --ndevs 4 --nmicros 4 --memory 10 --save figures \
-    > figures/interlace-4dev-4micro-10mem.log
+    --premise interlace_s2s --ndevs 4 --nmicros 4 --memory 10 --save figures \
+    > figures/interlace_s2s-4dev-4micro-10mem.log
+
+PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
+    --premise interlace_mlm --ndevs 4 --nmicros 4 --memory 10 --save figures \
+    > figures/interlace_mlm-4dev-4micro-10mem.log
 
 PYTHONPATH=.:$PYTHONPATH python examples/cases_tetris.py \
     --premise finetune --ndevs 4 --nmicros 4 --memory 10 --save figures \
@@ -46,7 +50,7 @@ class Premise:
         return sched
 
     @staticmethod
-    def interlace(ndevs: int) -> SchedPlan:
+    def interlace_s2s(ndevs: int) -> SchedPlan:
         """
         f f   f         b   b b
         f   f f         b b   b
@@ -69,12 +73,78 @@ class Premise:
         fdevs.insert(0, list(range(ndevs)))
         bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
         bdevs.insert(len(bblocks), list(range(ndevs)))
+    
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
+    
+    @staticmethod
+    def interlace_mlm(ndevs: int) -> SchedPlan:
+        """
+        f f       f b       b b
+        f   f     f b     b   b
+        f     f   f b   b     b
+        f       f f b b       b
+        """
+        sched = SchedPlan(ndevs)
+        # 
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        #
+        fblocks.insert(len(fblocks), Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(len(fdevs), list(range(ndevs)))
+        bblocks.insert(0, Block(0, span=2, memory=-1, btype=BW))
+        bdevs.insert(0, list(range(ndevs)))
+        #
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
+        bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
+        bdevs.insert(len(bblocks), list(range(ndevs)))
 
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
         return sched
     
+    @staticmethod
+    def two_tower(ndevs: int) -> SchedPlan:
+        """
+        f   f b-b b-b
+        f   f b-b b-b
+        f   f b-b     b-b
+          f f b-b b-b
+        """
+        sched = SchedPlan(ndevs)
+        # full spmd on loss:
+        loss = [Block(0, span=1, memory=1, btype=FW), Block(0, span=1, memory=-1, btype=BW)]
+        loss_devs = [list(range(ndevs)), list(range(ndevs))]
+        # spmd
+        ndevs1 = ndevs // 2
+        fbranch1 = [Block(0, span=1, memory=1, btype=FW)]
+        fdevs = [list(range(ndevs1))]
+        bbranch1 = [Block(0, span=2, memory=-1, btype=BW)]
+        bdevs = [list(range(ndevs1))]
+        branch1 = fbranch1 + [None] * (ndevs-ndevs1-1) + loss + bbranch1
+        branch1_devs = fdevs + [None] * (ndevs-ndevs1-1) + loss_devs + bdevs
+
+        # vshape
+        ndevs2 = ndevs - ndevs1
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs2)]
+        fdevs = [[devid+ndevs1] for devid in range(ndevs2)]
+        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs2)]
+        bdevs = [[devid+ndevs1] for devid in range(ndevs2)][::-1]
+        branch2 = fblocks + loss + bblocks
+        branch2_devs = fdevs + loss_devs + bdevs
+
+        print(branch1)
+        print(branch2)
+        sched.add_block_seq(branch2, branch2_devs)
+        sched.add_block_seq(branch1, branch1_devs)
+        return sched
+
     @staticmethod
     def finetune(ndevs: int) -> SchedPlan:
         """
@@ -117,9 +187,9 @@ class Premise:
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='comm primitive')
+    parser = argparse.ArgumentParser(description='Tetris Cases')
     parser.add_argument('--premise', type=str,
-                        choices=['vshape', 'interlace', 'finetune'])
+                        choices=['vshape', 'interlace_s2s', 'interlace_mlm', 'finetune', 'two_tower'])
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
@@ -154,6 +224,7 @@ if __name__ == '__main__':
 
     for idx, schedule in enumerate(schedules):
         print(f'schedule-{idx}:\n{schedule}')
+        print(f'Unrolled schedule:\n{schedule.unroll(args.nmicros + 2)}')
 
     if args.save is not None:
         now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
