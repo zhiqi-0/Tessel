@@ -9,7 +9,7 @@ from typing import List, Callable, Tuple, Dict
 from functools import partial
 import time
 
-from cube.ir.operator import IRFwOperation
+from cube.ir.operator import IRFwOperation, IRDataOperation
 from cube.graph import IRGraph
 from cube.graph.function.anchor import IRGraphAnchor
 
@@ -29,17 +29,45 @@ def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
     @return latency float: cost of executing these nodes
     """
     assert inflight > 0
+    # return 1000, 1000  # Fake for debug
     latency, memory = estimator(nodes, train=True)
-    # latency, memory = 1000, 1000  # Fake for debug
-    # TODO: need efficiency factor
+    # TODO: precise efficiency factor
+    efficiency = 1.0 + 0.1 * (t-1)
     latency = latency / (t * d)
+    latency *= efficiency
     if not recompute:
         memory = memory * inflight
     return 1e12 if memory > mem_limit else latency
 
 
+def iter_subgraph(nodes: Tuple[IRFwOperation], s: int):
+    """
+    Iterate sub-graphs of the nodes
+
+    @param nodes Tuple[IRFwOperation]
+    @param s int: number of stages
+
+    @return (sub_graph1, sub_graph2) Tuple[Tuple[IRFwOp], Tuple[IRFwOp]]
+    """
+    assert s > 0
+    if s > 1:
+        # don't consider the head and tail to be anchor
+        anchors = tuple(n for n in nodes[1:-1] if isinstance(n, IRGraphAnchor))
+        assert len(anchors) >= s - 1
+        for idx, anchor in enumerate(anchors):
+            remain_anchor = len(anchors) - (idx + 1)
+            # sub-problem of iter(sub_graph2, s-1) must iterable
+            if remain_anchor < s - 2: continue
+            nidx = nodes.index(anchor)
+            sub_graph1, sub_graph2 = nodes[:nidx], nodes[nidx:]
+            yield sub_graph1, sub_graph2
+    else:
+        # s == 1, take all
+        yield nodes, ()
+
+
 def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
-       _cost : Dict = None, _config : Dict =None) -> Dict:
+       mbs: int, _cost : Dict = None, _config : Dict =None) -> Dict:
     """
     
     cost[D][k][s] = min_{D' \in D} min_{t, d where t*d<=k} max( 
@@ -53,52 +81,41 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
 
     """
     nodes = nodes if isinstance(nodes, tuple) else tuple(nodes)
+    key = (nodes, k, s)
 
     # initialize: dp[((), k, s)] = 0 for every k and s
     _cost = dict() if _cost is None else _cost
     _config = dict() if _config is None else _config
+    if key in _cost: return _cost, _config
 
-    # dp tatble border
-    if len(nodes) == 0 or s == 0 or k == 0:
-        _cost[(nodes, k, s)] = 0
-        _config[(nodes, k, s)] = []
+    # dp tatble boundary
+    if len(nodes) == 0:
+        _cost[key], _config[key] = 0, []
         return _cost, _config
     
-    if k < s: # illegal space
-        _cost[(nodes, k, s)] = 1e12
-        _config[(nodes, k, s)] = []
-        return _cost, _config
-    
-    is_or_power2 = lambda n: (n & (n-1) == 0) and n != 0
-    if not is_or_power2(k):  # illegal space
-        _cost[(nodes, k, s)] = 1e12
-        _config[(nodes, k, s)] = []
-        return _cost, _config
+    assert not (k == 0 or s == 0), \
+        f"Illegal configuration: nodes: {len(nodes)} k={k}, s={s}: device number (k) cannot be smaller than pipeline stages (s)"
+    assert k >= s, f"Expected k >= s but got k={k}, s={s}"
 
+    # True for 1,2,4,8,16,...
+    is_of_power2 = lambda n: (n & (n-1) == 0) and n != 0
 
-    # split point
-    anchors = [node for node in nodes if isinstance(node, IRGraphAnchor)]
-    assert len(anchors) >= s - 1, f"require more partition positions but got: {len(anchors)} anchors for {s} stages"
-    if len(anchors) == 0:
-        assert s == 1
-        anchors += [None]
     # construct dynamic programming table
-    print(f'enter searching config nodes# {len(nodes)}, k={k}, s={s}, anchors# {len(anchors)}')
-    min_val = None
-    for anchor in anchors:
-        if s == 1:
-            sub1, sub2 = nodes, ()
-        else:
-            idx = nodes.index(anchor)
-            sub1, sub2 = nodes[:idx], nodes[idx:]
-        for d in range(1, k + 1):
+    min_val = None  # None means no solution
+    for sub1, sub2 in iter_subgraph(nodes, s):
+        for d in range(1, min(k + 1, mbs+1)):
+            if mbs % d != 0: continue
             for t in range(1, k // d + 1):
-                print(f'check searching config d={d}, t={t}, k={k}, s={s}')
+                # only search for gpu# of power of 2
+                if not is_of_power2(k * 2): continue
+                # guarantee sub-problem searchable
+                if k - d * t < s - 1: continue
                 # sub1 cost: s is also the in-flight microbatch number
                 sub1_cost = tps(sub1, t, d, s)
                 # sub2 cost
-                DP(sub2, k-d*t, s-1, tps, _cost, _config)
+                DP(sub2, k-d*t, s-1, tps, mbs, _cost, _config)
                 sub2_cost = _cost[(sub2, k-d*t, s-1)]
+                if sub2_cost is None: continue
                 # pipeline cost
                 cost = max(sub1_cost, sub2_cost)
                 config = [(sub1, d, t)] + _config[(sub2, k-d*t, s-1)]
@@ -107,20 +124,19 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
                     min_val = cost
                     _config[(nodes, k, s)] = config
 
-    print(f'finish searching config nodes# {len(nodes)}, k={k}, s={s}')
-    assert min_val is not None
-    _cost[(nodes, k, s)] = min_val
+    _cost[key] = min_val
     return _cost, _config
 
 
 def Piper(graph: IRGraph, resource, recompute: bool):
 
-    estimator = Estimator()
+    dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
+    mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
+    estimator = Estimator()
 
     mem_limit = resource.gpus[0].memory
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
-
 
     tps = partial(TPS, recompute=recompute, 
                   estimator=estimator, mem_limit=mem_limit)
@@ -128,7 +144,8 @@ def Piper(graph: IRGraph, resource, recompute: bool):
     nodes = tuple(graph.select(ntype=IRFwOperation))
 
     print(f'> search [initialize]: profiling model...')
-    _ = estimator(nodes, train=True)
+    latency, memory  = estimator(nodes, train=True)
+    print(f'> search [estimation]: single device latency: {latency:2f} ms, memory: {memory/1024/1024/1024} GB')
 
     # save profiled database
     print(f'> search [dump]: saving profiled database...')
@@ -139,25 +156,26 @@ def Piper(graph: IRGraph, resource, recompute: bool):
     print(f'> search [initialize]: initializing dp tables...')
     cost, config = None, None
     for nstages in range(1, resource.ngpus+1):
-        cost, config = DP(nodes, resource.ngpus, nstages, tps, cost, config)
+        cost, config = DP(nodes, resource.ngpus, nstages, tps, mbs, cost, config)
     
     # get best result
     print(f'> search [search]: search using DP algorithm...')
     min_cost, best_config = None, None
     for nstages in range(1, resource.ngpus+1):
         tcost = cost[(nodes, resource.ngpus, nstages)]
+        if tcost is None: continue
         if min_cost is None or tcost < min_cost:
             min_cost = tcost
             best_config = config[(nodes, resource.ngpus, nstages)]
 
-    print(f'> search [result]: minimal latency {min_cost}')
+    assert min_cost is not None, "no solution"
+
+    print(f'> search [result]: minimal latency per microbatch {min_cost} ms')
     print(f'> search [result]: best config:')
     for sid, stage_nodes_dp_tp in enumerate(best_config):
         stage_nodes, dp, tp = stage_nodes_dp_tp
         stage_anchors = tuple(n for n in stage_nodes if isinstance(n, IRGraphAnchor))
-        print(f'Stage: {sid} ({len(stage_anchors)} layers | dp={dp} | tp={tp})')
-        for anchor in stage_anchors:
-            print(anchor)
+        print(f'Stage-{sid}: ({len(stage_anchors)} layers ({len(stage_nodes)} nodes) | dp={dp} | tp={tp})')
     
     toc = time.time()
     span = toc - tic
