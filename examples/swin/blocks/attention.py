@@ -34,14 +34,15 @@ def window_attn(x: torch.Tensor,
     q = q * scale
     # B h N dh @ B h dh N -> B h N N
     attn = (q @ k.transpose(-2, -1))
-    # (wh ww) (wh * ww) h
-    relative_position_bias = relative_position_bias_table[
-        relative_position_index.view(-1)
-    ].view(wh * ww, wh * ww, -1)
-    # h (wh ww) (wh ww)
-    relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
-    # attn: B h N N
-    attn = attn + relative_position_bias.unsqueeze(0)
+    # FIXME: this will block profiling
+    # # (wh ww) (wh * ww) h
+    # relative_position_bias = relative_position_bias_table[
+    #     relative_position_index.view(-1)
+    # ].view(wh * ww, wh * ww, -1)
+    # # h (wh ww) (wh ww)
+    # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
+    # # attn: B h N N
+    # attn = attn + relative_position_bias.unsqueeze(0)
     if mask is not None:
         nW = mask.shape[0]
         attn = attn.view(B_ // nW, nW, h, N, N) + mask.unsqueeze(1).unsqueeze(0)

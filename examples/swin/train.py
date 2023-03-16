@@ -1,28 +1,13 @@
 """
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun --nproc_per_node=1 --nnodes=1 \
+OMP_NUM_THREADS=4 torchrun --nproc_per_node=1 --nnodes=1 \
     examples/swin/train.py \
         --fp16 --mbs 1 --gbs 1 --dp 1 --premise vshape \
         --layers 2 --hidden 512 --heads 16
-
-VISUALIZE_PLAN=1 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 --nnodes=1 \
-    examples/swin/train.py \
-        --fp16 --mbs 1 --gbs 6 --dp 1 --premise mshape \
-        --layers 2 --hidden 512 --heads 16 --save runtime_figures \
-    > runtime_figures/swin.mshape.4dev.log
-
-VISUALIZE_PLAN=1 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 --nnodes=1 \
-    examples/swin/train.py \
-        --fp16 --mbs 1 --gbs 6 --dp 1 --premise vshape \
-        --layers 2 --hidden 512 --heads 16 --save runtime_figures \
-    > runtime_figures/swin.vshape.4dev.log
 """
 
-from typing import List, Tuple
+from typing import List
 import torch
 import math
-import numpy as np
 from functools import partial
 
 from examples.swin.blocks.attention import init_relative_position_index
@@ -39,15 +24,16 @@ from cube.ir.cten import IRCell
 from cube.ir.operator import IRDataOperation, IRFwOperation
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.utils import layer_division_rules
+from tetris.runtime.utils import layer_division_rules, tp, replica, annotate_structure
 from tetris.runtime.policy import policy
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
+from tetris.runtime.piper import Piper
 
 import argparse
 
 parser = argparse.ArgumentParser(description='SwinTransformer Train')
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape'],
+parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper'],
                     help='premise shape')
 parser.add_argument('--fp16', action='store_true', default=False,
                     help='use fp16 for the training')
@@ -55,6 +41,11 @@ parser.add_argument('--mbs', type=int, default=1,
                     help='micro-batch size, premise total batch size')
 parser.add_argument('--gbs', type=int, default=256,
                     help='global batch size')
+# input size: (640, 40) or 1536, 48
+parser.add_argument('--resolution', type=int, default=640,
+                    help='image resolution')
+parser.add_argument('--window-size', type=int, default=40,
+                    help='window size')
 parser.add_argument('--dp', type=int, default=1, 
                     help='data parallel size')
 parser.add_argument('--recompute', action='store_true', default=False,
@@ -78,81 +69,20 @@ cube.init()
 print_each_rank(str(args), rank_only=0)
 
 
-# ================================ Policy ============================
-
-def _create_mesh(ngpus: int, group_num: Tuple[int]) -> Tuple[Tuple[Tuple[int]]]:
-    """
-    Create hybrid (nested) groups given the each group number.
-
-    The product of group_num should be same with total devices.
-
-    e.g., 6 device to 2 x 3 mesh will results [dim][group_id] = tuple[int]:
-        ( 
-            ( (0,1,2), (3,4,5) ),
-            ( (0,3), (2,5), (3,6) ),
-        )
-    """
-    group_num = np.array(group_num)
-    cnt = np.prod(group_num)
-    assert cnt == ngpus, 'total device not match'
-    grid = np.arange(cnt).reshape(tuple(group_num))
-    dims = list(range(len(group_num)))
-    outputs = []
-    for dim, num in enumerate(group_num):
-        remain = ngpus // num
-        order = tuple(dims[:dim] + dims[dim+1:] + [dim])
-        grid_dim = np.transpose(grid, order).reshape((remain,num))
-        grid_dim = grid_dim.tolist()
-        outputs.append(tuple(tuple(ranks) for ranks in grid_dim))
-    assert len(outputs) == len(group_num)
-    return tuple(outputs)
-
-
-def _group_to_transformers(fnodes) -> List[List[IRCell]]:
-    # group to transformer layers
-    transformers: List[List[IRFwOperation]] = []
-    anchors = [node for node in fnodes if isinstance(node, IRGraphAnchor)]
-    indices = [fnodes.index(anchor) for anchor in anchors]
-    for lid, idx in enumerate(indices):
-        fnodes[idx+1].comment = f'===> start of transformer layer {lid}'
-        start = idx if lid != 0 else 0
-        end = indices[lid+1] if lid + 1 < len(anchors) else len(fnodes)
-        transformers.append(fnodes[start:end])
-    for lid in range(len(transformers) - 1):
-        if transformers[lid][-1].name == 'multiref':
-            node = transformers[lid].pop()
-            transformers[lid+1].insert(0, node)
-    return transformers
-
-
 # ========================= parallelisms =================================
 
-# tensor parallelism
-def _tp(graph: IRGraph, node: IRFwOperation, devs: List[int], **configs):
-    if len(devs) == 1:
-        # for saving time
-        graph.assign(node, devs[0])
-        sub_nodes = [node]
-    else:
-        algo = node.algorithms('dim')
-        sub_nodes = graph.partition(node, algo, **configs)
-        assert sub_nodes is not None
-        for devid, sub_node in zip(devs, sub_nodes):
-            graph.assign(sub_node, devid)
-    return sub_nodes
-
-# replicate
-def _replica(graph: IRGraph, node: IRFwOperation, devs: List[int]):
-    if len(devs) == 1:
-        # for saving time
-        graph.assign(node, devs[0])
-        sub_nodes = [node]
-    else:
-        sub_nodes = graph.replicate(node, times=len(devs))
-        for devid, sub_node in zip(devs, sub_nodes):
-            graph.assign(sub_node, devid)
-    return sub_nodes
-
+def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
+    """Tensor parallelsim a stage"""
+    ndevs = len(devs)
+    for fnode in segment.select(ntype=IRFwOperation):
+        if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
+        if fnode.name == 'window_attn' or fnode.name == 'feedforward':
+            tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
+        elif fnode.name == 'linear':  # the last embedding linear
+            tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
+        else:
+            replica(graph, fnode, devs)
+    return segment
 
 # ========================= parallelisms =================================
 
@@ -167,7 +97,9 @@ def PASingle(graph: IRGraph, resource):
 
 # V100
 stage_comp_cost = {
+    192 : [109.93]  * 2 + [60.34]  * 2 + [43.18]  * args.layers + [27.51] * 2, # FAKE
     256 : [109.93]  * 2 + [60.34]  * 2 + [43.18]  * args.layers + [27.51] * 2,
+    384 : [255.10]  * 2 + [139.92] * 2 + [90.98 ] * args.layers + [63.78 ] * 2, # FAKE
     512 : [255.10]  * 2 + [139.92] * 2 + [90.98 ] * args.layers + [63.78 ] * 2,
     768 : [1486.10] * 2 + [795.47] * 2 + [618.98] * args.layers + [637.95] * 2,
     1024: [1170.26] * 2 + [615.17] * 2 + [452.65] * args.layers + [439.29] * 2,
@@ -177,16 +109,22 @@ stage_comp_cost = {
 
 def premise_vshape(graph: IRGraph, ndevs: int):
     """1F1B schedule"""
+    transformers = annotate_structure(graph)
+
     global stage_comp_cost
     FW, BW = 'forward', 'backward'
 
-    transformers = _group_to_transformers(graph.select(ntype=IRFwOperation))
     if args.recompute:
         for transformer in transformers:
             graph.recompute(transformer)
+
     pp_size = ndevs
-    layer_range_per_stage = layer_division_rules(pp_size, stage_comp_cost[args.hidden])
-    print(f'layer division: {layer_range_per_stage}')
+    layer_range_per_stage = layer_division_rules(
+        pp_size,
+        stage_comp_cost[args.hidden], 
+        limits=[1, 1, None, None]
+    )
+    print(f'pipeline ndevs: {pp_size}, layer division: {layer_range_per_stage}')
     fstages = [[] for _ in range(pp_size)]
     for lid, fnodes in enumerate(transformers):
         find_stage = False
@@ -212,24 +150,25 @@ def premise_vshape(graph: IRGraph, ndevs: int):
     devs = fdevs + bdevs
     sched.add_block_seq(blocks, devs)
 
-    print(graph.extra_repr())
+    # print(graph.extra_repr())
     return sched
 
 
 def premise_mshape(graph: IRGraph, ndevs: int):
     """MShape schedule"""
+    transformers = annotate_structure(graph)
+
     global stage_comp_cost
     FW, BW = 'forward', 'backward'
-
-    transformers = _group_to_transformers(graph.select(ntype=IRFwOperation))
     if args.recompute:
         for transformer in transformers:
             graph.recompute(transformer)
     
     comp_costs = stage_comp_cost[args.hidden]
     layer_range_per_stage = layer_division_rules(ndevs, comp_costs[2:])
-    layer_range_per_stage = [(s+2, e+2) for s, e in layer_range_per_stage]
-    layer_range_per_stage = [(0, 2),] + layer_range_per_stage
+    nlayers_to_tp = 2
+    layer_range_per_stage = [(s+nlayers_to_tp, e+nlayers_to_tp) for s, e in layer_range_per_stage]
+    layer_range_per_stage = [(0, nlayers_to_tp),] + layer_range_per_stage
     print(f'layer division: {layer_range_per_stage}')
     fstages = [[] for _ in range(len(layer_range_per_stage))]
     for lid, fnodes in enumerate(transformers):
@@ -290,11 +229,13 @@ def train():
     cfg.num_heads = [args.heads * (2 ** i) for i in range(4)]
     assert args.hidden % args.heads == 0
 
-    cfg.img_size = 1536
-    cfg.window_size = 48
+    cfg.img_size = args.resolution
+    cfg.window_size = args.window_size
+    assert (args.resolution, args.window_size) == (1536, 48) or \
+           (args.resolution, args.window_size) == (640, 40)
+
     cfg.num_classes = 1024 # for partitionable
 
-    cfg = Config()
     print_each_rank(f"model arch: layers={cfg.depths}, heads={cfg.num_heads}, hidden={cfg.embed_dim}", rank_only=0)
 
     if DeviceGroup().local_rank == 0:
@@ -306,11 +247,15 @@ def train():
     dtype = torch.float16 if args.fp16 else torch.float32
     dataloader = ImageDataLoader(batch_size, cfg.img_size, cfg.num_classes, dtype=dtype)
 
-    runtime_policy = partial(policy,
-                             num_microbatches = args.gbs//args.mbs,
-                             premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
-                             memory_limits = [8] * DeviceGroup().world_size,
-                             save_dir=args.save)
+    if args.premise == 'piper':
+        runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
+                                 recompute=args.recompute, tp_sprog=stage_tp)
+    else:
+        runtime_policy = partial(policy,
+                                 num_microbatches = args.gbs//args.mbs,
+                                 premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
+                                 memory_limits = [8] * DeviceGroup().world_size,
+                                 save_dir=args.save)
     # runtime_policy = PASingle
 
     model = cube.SemanticModel(model)
