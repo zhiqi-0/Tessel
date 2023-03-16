@@ -12,8 +12,11 @@ import time
 from cube.ir.operator import IRFwOperation, IRDataOperation
 from cube.graph import IRGraph
 from cube.graph.function.anchor import IRGraphAnchor
+from cube.graph.segment import IRSegment
+from cube.graph.schedule.predefined import PredefinedSched
 
 from tetris.runtime.estimator import Estimator
+from tetris.runtime.utils import replica
 
 
 def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
@@ -79,6 +82,8 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
     d: data parallelism size
     s: number of pipeline stages
 
+    costs: Dict[( (IRCell,), k, s ), latency]
+    config: Dict[( (IRCell,), k, s ), [(IRCell,),] ]
     """
     nodes = nodes if isinstance(nodes, tuple) else tuple(nodes)
     key = (nodes, k, s)
@@ -128,7 +133,20 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
     return _cost, _config
 
 
-def Piper(graph: IRGraph, resource, recompute: bool):
+def Piper(graph: IRGraph, resource, nmicros: int,
+          recompute: bool, tp_sprog: Callable):
+    """
+    Piper policy
+
+    @param graph IRGraph
+    @param resource EnvResource
+    @param nmicros int: number of microbatches
+    @param recompute bool: whether perform recompute
+    @param tp_sprog Callable: sProgram of tensor parallelism.
+        Takes graph, segment, tp_devs
+
+    @return graph IRGraph
+    """
 
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
@@ -180,3 +198,36 @@ def Piper(graph: IRGraph, resource, recompute: bool):
     toc = time.time()
     span = toc - tic
     print(f'> search [finish]: searching time: {span} s')
+
+    # ======================= instantiate plan ====================
+
+    fstages = [stage_nodes for stage_nodes, dp, tp in best_config]
+    graph.staging([snodes[0] for snodes in fstages])
+
+    segments = graph.select(ntype=IRSegment, flatten=False)
+    fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
+    assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
+
+    devices = list(range(resource.ngpus))
+    for sid, segment in enumerate(fsegments):
+        _, dp, tp = best_config[sid]
+        stage_devices, devices = devices[:dp*tp], devices[dp*tp:]
+        assert len(stage_devices) == dp * tp
+        # apply tensor parallelism
+        tp_sprog(graph, segment, stage_devices[:tp])
+        # apply data parallelism
+        if dp == 1: continue
+        else: assert False
+
+    assert len(devices) == 0
+
+    dls = graph.select(ntype=IRDataOperation)
+    assert len(dls) == 1, f"tp_sprog is not allowed to modify dataloader"
+    dl_ndevs = len(fsegments[0].device)
+    dls = graph.replicate(dls[0], times=dl_ndevs)
+    for dl, devid in zip(dls, range(dl_ndevs)):
+        graph.assign(dl, devid)
+
+    # print(graph.extra_repr())
+    PredefinedSched.sched_1f1b(graph, nmicros, len(fsegments))
+    return graph
