@@ -8,6 +8,7 @@ from cube.graph.schedule.schedplan import SchedulePlan as CSched
 
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
+from tetris.runtime.utils import annotate_structure, replica
 from tetris.composer import Composer
 from tetris.draw import Painter
 
@@ -64,9 +65,7 @@ def policy(graph: IRGraph, resource,
         if graph.depends(dl, segment):
             dl_devices.update(segment.device)
     dl_devices = sorted(dl_devices)
-    dls = graph.replicate(dl, len(dl_devices))
-    for devid, dl in zip(dl_devices, dls):
-        graph.assign(dl, devid)
+    replica(graph, dl, dl_devices)
 
     # print(graph.extra_repr())
 
@@ -88,7 +87,7 @@ def policy(graph: IRGraph, resource,
     tsched = schedplans[0]
 
     csched = schedule(graph, tsched, num_microbatches, block2seg)
-    print(f'> {csched}')
+    # print(f'> {csched}')
 
     if save_dir is not None:
         now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())

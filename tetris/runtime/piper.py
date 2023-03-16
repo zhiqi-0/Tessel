@@ -16,7 +16,7 @@ from cube.graph.segment import IRSegment
 from cube.graph.schedule.predefined import PredefinedSched
 
 from tetris.runtime.estimator import Estimator
-from tetris.runtime.utils import replica
+from tetris.runtime.utils import replica, annotate_structure
 
 
 def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
@@ -148,6 +148,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     @return graph IRGraph
     """
+    annotate_structure(graph)
 
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]

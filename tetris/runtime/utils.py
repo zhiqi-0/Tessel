@@ -5,14 +5,16 @@ from typing import List, Tuple
 import numpy as np
 
 from cube.graph.graph import IRGraph
+from cube.graph.function import IRGraphAnchor
+from cube.ir.operator import IRFwOperation
 from cube.ir.cten import IRCell
 from cube.graph.function.dimops import IRDimops
 
+import more_itertools
+
 
 def replica(graph: IRGraph, node: IRCell, devs: List[int]) -> List[IRDimops]:
-    """
-    replicate a node
-    """
+    """Replicate a node"""
     sub_nodes = [node] if len(devs) == 1 else graph.replicate(node, len(devs))
     for devid, sub_node in zip(devs, sub_nodes):
         graph.assign(sub_node, devid)
@@ -20,14 +22,23 @@ def replica(graph: IRGraph, node: IRCell, devs: List[int]) -> List[IRDimops]:
 
 
 def tp(graph: IRGraph, node: IRDimops, devs: List[int], **configs) -> List[IRDimops]:
-    """
-    tensor parallelism a node
-    """
+    """Tensor parallelism on a node"""
     sub_nodes = [node] if len(devs) == 1 \
         else graph.partition(node, node.algorithms('dim'), **configs)
     for devid, sub_node in zip(devs, sub_nodes):
         graph.assign(sub_node, devid)
     return sub_nodes
+
+
+def annotate_structure(graph: IRGraph) -> List[Tuple[IRFwOperation]]:
+    """Annotate graph stucture in generated code"""
+    anchors = graph.select(ntype=IRGraphAnchor)
+    for idx, anchor in enumerate(anchors):
+        nidx = graph.index(anchor)
+        graph.node(nidx + 1).comment = f'===> split position {idx}'
+    fnodes = graph.select(ntype=IRFwOperation)
+    subgraphs = more_itertools.split_when(fnodes, lambda n: isinstance(n, IRGraphAnchor))
+    return subgraphs
 
 
 def layer_division_rules(nstages: int, block_comp_cost: List[float],
