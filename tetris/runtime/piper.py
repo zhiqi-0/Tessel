@@ -5,7 +5,7 @@ https://openreview.net/attachment?id=-U9I0f2S7W&name=supplementary_material
 
 The implementation is a little bit adapted to fit with cube's view
 """
-from typing import List, Callable, Tuple, Dict
+from typing import List, Callable, Tuple, Dict, Optional
 from functools import partial
 import time
 
@@ -20,7 +20,7 @@ from tetris.runtime.utils import replica
 
 
 def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
-        recompute: bool, estimator: Callable, mem_limit) -> float:
+        recompute: bool, estimator: Callable, mem_limit) -> Optional[float]:
     """
     Get timer per sample (latency) of executing the nodes
     
@@ -40,7 +40,7 @@ def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
     latency *= efficiency
     if not recompute:
         memory = memory * inflight
-    return 1e12 if memory > mem_limit else latency
+    return None if memory > mem_limit else latency
 
 
 def iter_subgraph(nodes: Tuple[IRFwOperation], s: int):
@@ -117,6 +117,7 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
                 if k - d * t < s - 1: continue
                 # sub1 cost: s is also the in-flight microbatch number
                 sub1_cost = tps(sub1, t, d, s)
+                if sub1_cost is None: continue
                 # sub2 cost
                 DP(sub2, k-d*t, s-1, tps, mbs, _cost, _config)
                 sub2_cost = _cost[(sub2, k-d*t, s-1)]
@@ -222,11 +223,8 @@ def Piper(graph: IRGraph, resource, nmicros: int,
     assert len(devices) == 0
 
     dls = graph.select(ntype=IRDataOperation)
-    assert len(dls) == 1, f"tp_sprog is not allowed to modify dataloader"
-    dl_ndevs = len(fsegments[0].device)
-    dls = graph.replicate(dls[0], times=dl_ndevs)
-    for dl, devid in zip(dls, range(dl_ndevs)):
-        graph.assign(dl, devid)
+    assert len(dls) == 1, f"tp_sprog is not allowed to partition/replicate dataloader"
+    replica(graph, dls[0], fsegments[0].device)
 
     # print(graph.extra_repr())
     PredefinedSched.sched_1f1b(graph, nmicros, len(fsegments))
