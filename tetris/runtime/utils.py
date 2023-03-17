@@ -37,8 +37,8 @@ def annotate_structure(graph: IRGraph) -> List[Tuple[IRFwOperation]]:
         nidx = graph.index(anchor)
         graph.node(nidx + 1).comment = f'===> split position {idx}'
     fnodes = graph.select(ntype=IRFwOperation)
-    subgraphs = more_itertools.split_when(fnodes, lambda n: isinstance(n, IRGraphAnchor))
-    return subgraphs
+    subgraphs = more_itertools.split_before(fnodes, lambda n: isinstance(n, IRGraphAnchor))
+    return list(subgraphs)
 
 
 def layer_division_rules(nstages: int, block_comp_cost: List[float],

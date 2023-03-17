@@ -15,17 +15,18 @@ from examples.swin.model import Config, SwinTransformer, ImageDataLoader
 
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
-from cube.profiler.memory import memory_summary, model_summary
+from cube.profiler.memory import memory_summary
 
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
 from cube.graph.function.anchor import IRGraphAnchor
-from cube.ir.cten import IRCell
 from cube.ir.operator import IRDataOperation, IRFwOperation
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.utils import layer_division_rules, tp, replica, annotate_structure
-from tetris.runtime.policy import policy
+from tetris.runtime.utils import tp, replica, annotate_structure
+from tetris.runtime.division import TPS, layer_division
+from tetris.runtime.sched import tsched
+from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
 from tetris.runtime.piper import Piper
@@ -62,7 +63,8 @@ parser.add_argument('--heads', type=int, required=True,
 # log save
 parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
-
+parser.add_argument('--db-cache', type=str, default='db.json',
+                    help='profiled database save file')
 args = parser.parse_args()
 
 cube.init()
@@ -87,27 +89,13 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
 # ========================= parallelisms =================================
 
 def PASingle(graph: IRGraph, resource):
-    """
-    Debugging policy
-    """
+    """Debugging policy"""
     for node in graph.select(ntype=(IRFwOperation, IRDataOperation)):
         graph.assign(node, 0)
     return graph
 
 
-# V100
-stage_comp_cost = {
-    192 : [109.93]  * 2 + [60.34]  * 2 + [43.18]  * args.layers + [27.51] * 2, # FAKE
-    256 : [109.93]  * 2 + [60.34]  * 2 + [43.18]  * args.layers + [27.51] * 2,
-    384 : [255.10]  * 2 + [139.92] * 2 + [90.98 ] * args.layers + [63.78 ] * 2, # FAKE
-    512 : [255.10]  * 2 + [139.92] * 2 + [90.98 ] * args.layers + [63.78 ] * 2,
-    768 : [1486.10] * 2 + [795.47] * 2 + [618.98] * args.layers + [637.95] * 2,
-    1024: [1170.26] * 2 + [615.17] * 2 + [452.65] * args.layers + [439.29] * 2,
-    1536: [1009.80] * 2 + [521.61] * 2 + [315.63] * args.layers + [302.63] * 2,
-}
-
-
-def premise_vshape(graph: IRGraph, ndevs: int):
+def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """1F1B schedule"""
     transformers = annotate_structure(graph)
 
@@ -119,21 +107,13 @@ def premise_vshape(graph: IRGraph, ndevs: int):
             graph.recompute(transformer)
 
     pp_size = ndevs
-    layer_range_per_stage = layer_division_rules(
-        pp_size,
-        stage_comp_cost[args.hidden], 
-        limits=[1, 1, None, None]
-    )
-    print(f'pipeline ndevs: {pp_size}, layer division: {layer_range_per_stage}')
-    fstages = [[] for _ in range(pp_size)]
-    for lid, fnodes in enumerate(transformers):
-        find_stage = False
-        for sid, (start, end) in enumerate(layer_range_per_stage):
-            if start <= lid and lid < end:
-                find_stage = True
-                break
-        assert find_stage
-        fstages[sid] += fnodes
+
+    fnodes = graph.select(ntype=IRFwOperation)
+    estimator = Estimator(args.db_cache)
+    tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
+    min_cost, best_config = layer_division(fnodes, ndevs, tps, args.mbs, max_d=1, max_t=1)
+
+    fstages = [stage_nodes for stage_nodes, _, _ in best_config]
     graph.staging(tuple(stages[0] for stages in fstages))
     
     segments = graph.select(ntype=IRSegment, flatten=False)
@@ -154,48 +134,35 @@ def premise_vshape(graph: IRGraph, ndevs: int):
     return sched
 
 
-def premise_mshape(graph: IRGraph, ndevs: int):
+def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """MShape schedule"""
     transformers = annotate_structure(graph)
-
-    global stage_comp_cost
     FW, BW = 'forward', 'backward'
     if args.recompute:
         for transformer in transformers:
             graph.recompute(transformer)
     
-    comp_costs = stage_comp_cost[args.hidden]
-    layer_range_per_stage = layer_division_rules(ndevs, comp_costs[2:])
     nlayers_to_tp = 2
-    layer_range_per_stage = [(s+nlayers_to_tp, e+nlayers_to_tp) for s, e in layer_range_per_stage]
-    layer_range_per_stage = [(0, nlayers_to_tp),] + layer_range_per_stage
-    print(f'layer division: {layer_range_per_stage}')
-    fstages = [[] for _ in range(len(layer_range_per_stage))]
-    for lid, fnodes in enumerate(transformers):
-        find_stage = False
-        for sid, (start, end) in enumerate(layer_range_per_stage):
-            if start <= lid and lid < end:
-                find_stage = True
-                break
-        assert find_stage
-        fstages[sid] += fnodes
+    full_tps, sub_tps = [], []
+    for idx, layer_nodes in enumerate(transformers):
+        if idx < nlayers_to_tp:
+            full_tps += layer_nodes
+        else:
+            sub_tps += layer_nodes
+
+    estimator = Estimator(args.db_cache)
+    tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
+    min_cost, best_config = layer_division(sub_tps, ndevs, tps, args.mbs, max_d=1, max_t=1)
+
+    fstages = [full_tps] + [stage_nodes for stage_nodes, _, _ in best_config]
     graph.staging(tuple(stages[0] for stages in fstages))
 
     segments = graph.select(ntype=IRSegment, flatten=False)
     fsegments = [seg for seg in segments if seg.isfw()]
 
     tp_devs = list(range(ndevs))
-    for fnode in fsegments[0].select(ntype=IRFwOperation):
-        if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
-        if fnode.name == 'window_attn' or fnode.name == 'feedforward':
-            subnodes = _tp(graph, fnode, tp_devs, idx=1, dim=0, num=ndevs)
-        elif fnode.name == 'linear':  # the last embeding linear
-            subnodes = _tp(graph, fnode, tp_devs, idx=1, dim=0, num=ndevs)
-        else:
-            subnodes = _replica(graph, fnode, tp_devs)
-        for devid, subnode in enumerate(subnodes):
-            graph.assign(subnode, devid)
-    
+    stage_tp(graph, fsegments[0], tp_devs)
+
     for devid, segment in enumerate(fsegments[1:]):
         graph.assign(segment, devid)
 
@@ -227,14 +194,12 @@ def train():
     cfg.embed_dim = args.hidden
     cfg.depths = [2, 2, args.layers, 2]
     cfg.num_heads = [args.heads * (2 ** i) for i in range(4)]
-    assert args.hidden % args.heads == 0
-
     cfg.img_size = args.resolution
     cfg.window_size = args.window_size
+    cfg.num_classes = 1024  # for partitionable
+    assert args.hidden % args.heads == 0
     assert (args.resolution, args.window_size) == (1536, 48) or \
            (args.resolution, args.window_size) == (640, 40)
-
-    cfg.num_classes = 1024 # for partitionable
 
     print_each_rank(f"model arch: layers={cfg.depths}, heads={cfg.num_heads}, hidden={cfg.embed_dim}", rank_only=0)
 
@@ -249,12 +214,12 @@ def train():
 
     if args.premise == 'piper':
         runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
-                                 recompute=args.recompute, tp_sprog=stage_tp)
+                                 recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
     else:
-        runtime_policy = partial(policy,
+        runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
                                  premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
-                                 memory_limits = [8] * DeviceGroup().world_size,
+                                 max_inflight_blks = [8] * DeviceGroup().world_size,
                                  save_dir=args.save)
     # runtime_policy = PASingle
 

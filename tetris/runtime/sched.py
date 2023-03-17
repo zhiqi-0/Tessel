@@ -34,25 +34,27 @@ def schedule(graph: IRGraph, tsched: Union[str, TSched], num_microbatches: int, 
     return csched
 
 
-def policy(graph: IRGraph, resource,
+def tsched(graph: IRGraph, resource,
            num_microbatches: int,
            premise: Callable[[IRGraph, int], TSched],
-           memory_limits: List[int],
+           max_inflight_blks: List[int],
            save_dir: Optional[str] = None) -> IRGraph:
     """
     Compile policy in cube.
 
     @param graph IRGraph
-    @param resource
+    @param resource EnvResource
     @param num_microbatches int
-    @param premise Callable[[IRGraph], IRGraph]:
+    @param premise Callable[[IRGraph], IRGraph, int]:
         Premise function to partition the whole graph into multiple sub-graphs
+    @param max_inflight_blks List[int]: maximal inflight blocks of each device
     @param tsched TSched: searched schedule plan
 
     @return graph IRGraph
     """
-    assert len(memory_limits) == resource.ngpus, f"Only support for same device number"
-    micro = premise(graph, resource.ngpus)
+    assert len(max_inflight_blks) == resource.ngpus, f"Only support for same device number"
+    memory = resource.gpus[0].memory
+    micro = premise(graph, resource.ngpus, memory)
     assert not any(isinstance(node, IRFwOperation) for node in graph.nodes()), \
         "Premise should call graph.blocking() or graph.staging()"
     
@@ -82,7 +84,7 @@ def policy(graph: IRGraph, resource,
     nmicros = resource.ngpus
     micros: List[TSched] = [micro.copy(mid) for mid in range(nmicros)]
     # compose
-    schedplans = Composer.compose(micros, memory_limits)
+    schedplans = Composer.compose(micros, max_inflight_blks)
     assert len(schedplans) > 0, f"No schedule solution"
     tsched = schedplans[0]
 
