@@ -49,7 +49,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     print(f'> search [initialize]: profiling model...')
     latency, memory  = estimator(nodes, train=True)
-    print(f'> search [estimation]: single device latency: {latency:2f} ms, memory: {memory/1024/1024/1024} GB')
+    print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
 
     # save profiled database
     print(f'> search [dump]: saving profiled database...')
@@ -72,6 +72,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
         stage_devices, devices = devices[:dp*tp], devices[dp*tp:]
         assert len(stage_devices) == dp * tp
         # apply tensor parallelism
+        print(f'> applying {tp}-way tensor parallelism')
         tp_sprog(graph, segment, stage_devices[:tp])
         # apply data parallelism
         if dp == 1: continue

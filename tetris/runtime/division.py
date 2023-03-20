@@ -8,36 +8,47 @@ The implementation is a little bit adapted to fit with cube's view
 from typing import List, Callable, Tuple, Dict, Optional
 import time
 
+from cube.ir.cten import IRTensor
 from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
 
 
-def TPS(nodes: List[IRFwOperation], t: int, d: int, inflight: int,
-        recompute: bool, estimator: Callable, mem_limit: Optional[int] = None) -> Optional[float]:
+def TPS(nodes: List[IRFwOperation], d: int, t: int, inflight: int,
+        recompute: bool, estimator: Callable, mem_limit: int) -> Optional[float]:
     """
     Get timer per sample (latency) of executing the nodes
     
-    @param t int: tensor parallelism size
     @param d int: data parallelism size
+    @param t int: tensor parallelism size
     @param inflight int: in-flight micro-batch numbers
     @param estimator Callable: take (nodes, t, d) return cost and memory
 
-    @return latency float: cost of executing these nodes
+    @return latency Optional[float]: cost of executing these nodes
+    @return memory int: estimated memory in bytes
     """
-    assert inflight > 0
     # return 1000, 1000  # Fake for debug
+    # TODO: precise efficiency factor and memory preservation
+    tp_mem_efficiency = 1.0 + 0.15 * (t-1)
+    tp_com_efficienty = 1.0 + 0.10 * (t-1)
+    mem_preserve = 2 * 1024 * 1024 * 1024 # 2GB
+    assert t > 0 and d > 0 and inflight > 0
+
+    # parameter size
+    param_size = 0
+    for node in nodes:
+        tsrs = (tsr for tsr in node.inputs() if isinstance(tsr, IRTensor))
+        for tensor in tsrs:
+            param_size += tensor.byte_size()
+
     latency, memory = estimator(nodes, train=True)
-    # TODO: precise efficiency factor
-    efficiency = 1.0 + 0.1 * (t-1)
+    act_memory = memory - param_size
+    memory = param_size / t + act_memory / (t*d)
+    memory *= tp_mem_efficiency
     latency = latency / (t * d)
-    latency *= efficiency
+    latency *= tp_com_efficienty
     if not recompute:
         memory = memory * inflight
-    if isinstance(mem_limit, int) and memory > mem_limit:
-        return None
-    else:
-        return latency
-
+    return latency if memory < mem_limit-mem_preserve else None, memory
 
 def iter_subgraph(nodes: Tuple[IRFwOperation], s: int):
     """
@@ -128,7 +139,7 @@ def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
                 # guarantee sub-problem searchable
                 if k - d * t < s - 1: continue
                 # sub1 cost: s is also the in-flight microbatch number
-                sub1_cost = tps(sub1, t, d, s)
+                sub1_cost, _ = tps(sub1, d, t, s)
                 if sub1_cost is None: continue
                 # sub2 cost
                 DP(sub2, k-d*t, s-1, tps, mbs, max_d, max_t, _cost, _config)
@@ -191,6 +202,9 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     print(f'> search [result]: minimal latency per microbatch {min_cost} ms')
     print(f'> search [result]: division plan:')
     for sidx, (stage_nodes, dp, tp) in enumerate(best_config):
+        # tp = 1 if sidx == 1 else tp
         nlayers = len([n for n in stage_nodes if isinstance(n, IRGraphAnchor)])
-        print(f'    stage-{sidx}: layers: {nlayers} | dp = {dp}, tp = {tp}')
+        est_latency, est_mem = tps(stage_nodes, dp, tp, len(best_config) - sidx)
+        est_latency, est_mem = round(est_latency, 2), round(est_mem / 1024 / 1024 / 1024, 2)
+        print(f'    stage-{sidx}: layers: {nlayers} | dp = {dp}, tp = {tp} | est latency: {est_latency} ms, est memory: {est_mem} GB')
     return min_cost, best_config
