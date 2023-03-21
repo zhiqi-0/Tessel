@@ -19,7 +19,7 @@ from tetris.runtime.division import TPS, layer_division
 
 
 def Piper(graph: IRGraph, resource, nmicros: int,
-          recompute: bool, tp_sprog: Callable, db_cache: str = 'db.json'):
+          recompute: bool, tp_sprog: Callable, db_cache):
     """
     Piper policy
 
@@ -33,24 +33,20 @@ def Piper(graph: IRGraph, resource, nmicros: int,
     @return graph IRGraph
     """
     annotate_structure(graph)
+    nodes = tuple(graph.select(ntype=IRFwOperation))
 
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    estimator = Estimator(db_cache)
-
     mem_limit = resource.gpus[0].memory
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
+    estimator = Estimator(db_cache)
     tps = partial(TPS, recompute=recompute, 
                   estimator=estimator, mem_limit=mem_limit)
-
-    nodes = tuple(graph.select(ntype=IRFwOperation))
-
     print(f'> search [initialize]: profiling model...')
     latency, memory  = estimator(nodes, train=True)
     print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
-
     # save profiled database
     print(f'> search [dump]: saving profiled database...')
     estimator.save()

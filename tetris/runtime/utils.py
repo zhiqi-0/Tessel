@@ -1,9 +1,11 @@
 """
 Premise utils
 """
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
+import torch
 
+import cube
 from cube.graph.graph import IRGraph
 from cube.graph.function import IRGraphAnchor
 from cube.ir.operator import IRFwOperation
@@ -39,6 +41,61 @@ def annotate_structure(graph: IRGraph) -> List[Tuple[IRFwOperation]]:
     fnodes = graph.select(ntype=IRFwOperation)
     subgraphs = more_itertools.split_before(fnodes, lambda n: isinstance(n, IRGraphAnchor))
     return list(subgraphs)
+
+
+class MemoryProfiler:
+
+    class __MemoryProfiler:
+
+        def __init__(self):
+            self.field = dict()
+            self.profiled = set()
+    
+    instance = None
+
+    def __init__(self) -> None:
+        if not MemoryProfiler.instance:
+            MemoryProfiler.instance = MemoryProfiler.__MemoryProfiler()
+
+    def start(self, field: str):
+        torch.cuda.synchronize()
+        if field not in self.field:
+            MemoryProfiler.instance.field[field] = torch.cuda.max_memory_allocated()
+
+    def stop(self, field: str):
+        if field in self.profiled: return
+        torch.cuda.synchronize()
+        assert field in MemoryProfiler.instance.field
+        MemoryProfiler.instance.field[field] = \
+            torch.cuda.max_memory_allocated() - MemoryProfiler.instance.field[field]
+        MemoryProfiler.instance.profiled.add(field)
+
+    def get(self, field: str) -> int:
+        return MemoryProfiler.instance.field[field]
+
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+
+
+@cube.graph.parser.register('* -> *')
+@torch.jit.ignore
+def profile_start(dummy: torch.Tensor, s: str, idx: int):
+    from cube.profiler.timer import CudaTimer
+    from tetris.runtime.utils import MemoryProfiler
+    field = s + str(idx)
+    CudaTimer().start(field)
+    MemoryProfiler().start(field)
+    return dummy
+
+@cube.graph.parser.register('* -> *')
+@torch.jit.ignore
+def profile_stop(dummy: torch.Tensor, s: str, idx: int):
+    from cube.profiler.timer import CudaTimer
+    from tetris.runtime.utils import MemoryProfiler
+    field = s + str(idx)
+    CudaTimer().stop(field)
+    MemoryProfiler().stop(field)
+    return dummy
 
 
 def layer_division_rules(nstages: int, block_comp_cost: List[float],

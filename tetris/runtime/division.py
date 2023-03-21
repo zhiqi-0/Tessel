@@ -12,8 +12,10 @@ from cube.ir.cten import IRTensor
 from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
 
+from tetris.runtime.layer_op import IRLayerOp, cluster_to_layer_ops
 
-def TPS(nodes: List[IRFwOperation], d: int, t: int, inflight: int,
+
+def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
         recompute: bool, estimator: Callable, mem_limit: int) -> Optional[float]:
     """
     Get timer per sample (latency) of executing the nodes
@@ -33,24 +35,33 @@ def TPS(nodes: List[IRFwOperation], d: int, t: int, inflight: int,
     mem_preserve = 2 * 1024 * 1024 * 1024 # 2GB
     assert t > 0 and d > 0 and inflight > 0
 
+    all_nodes = []
+    for layer_op in nodes:
+        all_nodes += layer_op.nodes
+    nodes = all_nodes
+
     # parameter size
     param_size = 0
     for node in nodes:
-        tsrs = (tsr for tsr in node.inputs() if isinstance(tsr, IRTensor))
-        for tensor in tsrs:
-            param_size += tensor.byte_size()
+        for tensor in node.inputs():
+            if isinstance(tensor, IRTensor) and tensor.is_attr():
+                param_size += tensor.byte_size()
 
     latency, memory = estimator(nodes, train=True)
-    act_memory = memory - param_size
-    memory = param_size / t + act_memory / (t*d)
-    memory *= tp_mem_efficiency
+    act_memory = memory # - param_size
+    # memory
+    act_memory = act_memory / (t * d) * tp_mem_efficiency
+    param_size = param_size / t
+    # latency
     latency = latency / (t * d)
     latency *= tp_com_efficienty
-    if not recompute:
-        memory = memory * inflight
+    inflight = 1 if recompute else inflight
+    # consider gradient and adam optimizer (totally 3x param size)
+    memory = param_size * 4 + act_memory * inflight
     return latency if memory < mem_limit-mem_preserve else None, memory
 
-def iter_subgraph(nodes: Tuple[IRFwOperation], s: int):
+
+def iter_subgraph(nodes: Tuple[IRLayerOp], s: int):
     """
     Iterate sub-graphs of the nodes
 
@@ -62,21 +73,19 @@ def iter_subgraph(nodes: Tuple[IRFwOperation], s: int):
     assert s > 0
     if s > 1:
         # don't consider the head and tail to be anchor
-        anchors = tuple(n for n in nodes[1:-1] if isinstance(n, IRGraphAnchor))
-        assert len(anchors) >= s - 1
-        for idx, anchor in enumerate(anchors):
-            remain_anchor = len(anchors) - (idx + 1)
+        assert len(nodes) >= s - 1
+        for idx in range(len(nodes)):
+            remain_nodes = len(nodes) - (idx + 1)
             # sub-problem of iter(sub_graph2, s-1) must iterable
-            if remain_anchor < s - 2: continue
-            nidx = nodes.index(anchor)
-            sub_graph1, sub_graph2 = nodes[:nidx], nodes[nidx:]
+            if remain_nodes < s - 2: continue
+            sub_graph1, sub_graph2 = nodes[:idx+1], nodes[idx+1:]
             yield sub_graph1, sub_graph2
     else:
         # s == 1, take all
         yield nodes, ()
 
 
-def DP(nodes: Tuple[IRFwOperation], k: int, s: int, tps: Callable,
+def DP(nodes: Tuple[IRLayerOp], k: int, s: int, tps: Callable,
        mbs: int, max_d: Optional[int] = None, max_t: Optional[int] = None,
        _cost : Dict = None, _config : Dict =None) -> Tuple[Dict, Dict]:
     """
@@ -177,6 +186,7 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     @return best_config List[Tuple[SubGraph, int, int]]:
         [ ( (IRCell,), dp_size, tp_size ), ... ]
     """
+    nodes: List[IRLayerOp] = cluster_to_layer_ops(nodes)
     nodes = tuple(nodes)
     print(f'> search [search]: constructing dp tables...')
     tic = time.time()
@@ -201,10 +211,17 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     print(f'> search [finish]: searching time: {span} s')
     print(f'> search [result]: minimal latency per microbatch {min_cost} ms')
     print(f'> search [result]: division plan:')
-    for sidx, (stage_nodes, dp, tp) in enumerate(best_config):
+    for sidx, (layer_ops, dp, tp) in enumerate(best_config):
         # tp = 1 if sidx == 1 else tp
-        nlayers = len([n for n in stage_nodes if isinstance(n, IRGraphAnchor)])
-        est_latency, est_mem = tps(stage_nodes, dp, tp, len(best_config) - sidx)
+        nlayers = len(layer_ops)
+        est_latency, est_mem = tps(layer_ops, dp, tp, len(best_config) - sidx)
         est_latency, est_mem = round(est_latency, 2), round(est_mem / 1024 / 1024 / 1024, 2)
         print(f'    stage-{sidx}: layers: {nlayers} | dp = {dp}, tp = {tp} | est latency: {est_latency} ms, est memory: {est_mem} GB')
-    return min_cost, best_config
+    # unpack to IRFwOperations
+    best_config_fwops = []
+    for layer_ops, dp, tp in best_config:
+        fwops = []
+        for layer_op in layer_ops:
+            fwops += layer_op.nodes
+        best_config_fwops.append((fwops, dp, tp))
+    return min_cost, best_config_fwops
