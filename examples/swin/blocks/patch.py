@@ -6,7 +6,7 @@ import torch.nn as nn
 import cube
 
 
-@cube.graph.parser.register('B (2 h^ 2 w^) C^ -> B (h w) (4 C)')
+@cube.graph.parser.register('B (2 h^ 2 w^) C^ -> B (h^ w^) (4 C^)')
 def patch_merge(x: torch.Tensor, h: int, w: int):
     B, L, C = x.shape
     H = 2 * h

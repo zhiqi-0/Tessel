@@ -8,6 +8,8 @@ from examples.swin.blocks.patch import PatchEmbed, PatchMerging
 import cube
 from dataclasses import dataclass
 
+from tetris.runtime.utils import profile_start, profile_stop
+
 
 def trunc_normal_(tensor: torch.Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.):
     with torch.no_grad():
@@ -95,7 +97,7 @@ class BasicLayer(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
     """
 
-    def __init__(self, dim, input_resolution, depth, num_heads, window_size,
+    def __init__(self, layer_idx_ofst: int, dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., norm_layer=nn.LayerNorm, downsample=None):
 
@@ -103,6 +105,7 @@ class BasicLayer(nn.Module):
         self.dim = dim
         self.input_resolution = input_resolution
         self.depth = depth
+        self.layer_idx_ofst = layer_idx_ofst
 
         # build blocks
         self.blocks = nn.ModuleList([
@@ -115,6 +118,8 @@ class BasicLayer(nn.Module):
                                  drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
                                  norm_layer=norm_layer)
             for i in range(depth)])
+        
+        self.register_buffer('timer', torch.tensor(1.0))
 
         # patch merging layer
         if downsample is not None:
@@ -123,9 +128,11 @@ class BasicLayer(nn.Module):
             self.downsample = None
 
     def forward(self, x):
-        for blk in self.blocks:
+        for idx, blk in enumerate(self.blocks):
             cube.runtime.function.anchor('transformer block start')
+            # profile_start(self.timer, 'blk', self.layer_idx_ofst + idx)
             x = blk(x)
+            # profile_stop(self.timer, 'blk', self.layer_idx_ofst + idx)
         if self.downsample is not None:
             x = self.downsample(x)
         return x
@@ -174,7 +181,8 @@ class SwinTransformer(nn.Module):
         # build layers
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
-            layer = BasicLayer(dim=int(cfg.embed_dim * 2 ** i_layer),
+            layer = BasicLayer(layer_idx_ofst=sum(cfg.depths[:i_layer]),
+                               dim=int(cfg.embed_dim * 2 ** i_layer),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
                                                  patches_resolution[1] // (2 ** i_layer)),
                                depth=cfg.depths[i_layer],

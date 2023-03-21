@@ -20,7 +20,7 @@ def drop_path(x: torch.Tensor, drop_prob: float, training: bool):
     return output
 
 
-@cube.graph.parser.register('B (nh ws^) (nw^ ws^) C -> (B nh nw^) ws^ ws^ C')
+@cube.graph.parser.register('B (nh^ ws^) (nw^ ws^) C -> (B nh^ nw^) ws^ ws^ C')
 def window_partition(x: torch.Tensor, ws: int):
     """
     Args:
