@@ -23,7 +23,7 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.ir.operator import IRDataOperation, IRFwOperation
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.utils import tp, replica, annotate_structure
+from tetris.runtime.utils import tp, replica, annotate_structure, MemoryProfiler
 from tetris.runtime.division import TPS, layer_division
 from tetris.runtime.sched import tsched
 from tetris.runtime.estimator import Estimator
@@ -34,8 +34,6 @@ from tetris.runtime.piper import Piper
 import argparse
 
 parser = argparse.ArgumentParser(description='SwinTransformer Train')
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper'],
-                    help='premise shape')
 parser.add_argument('--fp16', action='store_true', default=False,
                     help='use fp16 for the training')
 parser.add_argument('--mbs', type=int, default=1,
@@ -60,6 +58,9 @@ parser.add_argument('--hidden', type=int, required=True,
                     help="the first stage embedding dimension")
 parser.add_argument('--heads', type=int, required=True,
                     help="the first stage number of head")
+# policy
+parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'profile'],
+                    help='premise shape')
 # log save
 parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
@@ -88,10 +89,12 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
 
 # ========================= parallelisms =================================
 
-def PASingle(graph: IRGraph, resource):
-    """Debugging policy"""
-    for node in graph.select(ntype=(IRFwOperation, IRDataOperation)):
-        graph.assign(node, 0)
+def PASProfile(graph: IRGraph, resource):
+    """Profile performance"""
+    devs = list(range(resource.ngpus))
+    graph = stage_tp(graph, graph, devs)
+    for dl in graph.select(ntype=IRDataOperation):
+        replica(graph, dl, devs)
     return graph
 
 
@@ -212,7 +215,9 @@ def train():
     dtype = torch.float16 if args.fp16 else torch.float32
     dataloader = ImageDataLoader(batch_size, cfg.img_size, cfg.num_classes, dtype=dtype)
 
-    if args.premise == 'piper':
+    if args.premise == 'profile':
+        runtime_policy = PASProfile
+    elif args.premise == 'piper':
         runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
                                  recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
     else:
@@ -221,7 +226,6 @@ def train():
                                  premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
                                  max_inflight_blks = [8] * DeviceGroup().world_size,
                                  save_dir=args.save)
-    # runtime_policy = PASingle
 
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=load_content)
@@ -269,6 +273,18 @@ def train():
     print_each_rank('e2e time (ms) per iteration: {} ms'.format(
         CudaTimer().duration(iter_num-warmup, field_name='e2e')))
     CudaTimer().print_all(times=iter_num-warmup)
+
+    if torch.distributed.get_rank() == 0 and args.premise == 'profile':
+        memory = []
+        latency = []
+        for idx in range(sum(cfg.depths)):
+            name = f'blk{idx}'
+            span = CudaTimer().duration(iter_num-warmup, name)
+            mem = MemoryProfiler().get(f'blk{idx}')
+            latency.append(span)
+            memory.append(mem)
+            print(f'blk{idx} memory: {round(mem / 1024 / 1024, 2)} MB | latency: {round(span, 2)} ms')
+        print(f'sumed activation: {sum(memory) / 1024 / 1024 / 1024} GB')
     memory_summary()
 
 

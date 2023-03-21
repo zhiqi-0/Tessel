@@ -16,12 +16,11 @@ def get_partition_space(node: IRDimops) -> List[Tuple[int, int]]:
     @param node IRDimops
     @return space List[Tuple[int, int, int]]: tuple of configs: (idx, dim)
     """
+    if not isinstance(node, IRDimops):
+        return []
     visited : Set[str] = set()
     configs = []
     eshapes = node.anno.inputs() + node.anno.outputs()
-    adims: Set[DimAnno] = set()
-    for eshape in eshapes:
-        adims.update(eshape.dims)
     for idx, eshape in enumerate(eshapes):
         for dim, edim in enumerate(eshape.dims):
             for identifier, reduce in zip(edim.identifiers, edim.reduces):
@@ -61,17 +60,33 @@ class Estimator:
         for node in nodes:
             if node.name == 'multiref' or isinstance(node, IRGraphAnchor):
                 continue
-            infer_span, infer_mem, train_span, train_mem = self.database.profile(node)
-            if isinstance(train_span, Exception):
-                color, default = '\033[31m', '\033[0m'
-                error_msg = f'fail to run node: {node}\nerror: {train_span}'
-                print(f'{color}{error_msg}{default}', file=sys.stderr)
-                assert isinstance(infer_span, float)
-                train_span = infer_span * 2
-                train_mem = 16 * 1024 * 1024 * 1024
-                self.database.insert(node, infer_span, infer_mem, train_span, train_mem)
-            memory += train_mem
-            latency += train_span
+            trials = [None,] + get_partition_space(node)
+            for config in trials:
+                if config is None:
+                    num = 1
+                    infer_span, infer_mem, train_span, train_mem = self.database.profile(node)
+                else:
+                    algo = node.algorithms('dim')
+                    idx, dim = config
+                    dimlen = node.input(idx).shape[dim]
+                    num = 2
+                    while num < dimlen:
+                        if dimlen % num != 0:
+                            dim *= 2
+                            continue
+                        if not algo.satisfy(idx=idx, dim=dim, num=num): break
+                        print(f'> ... try node {node.name} with idx={idx}, dim={dim}, num={num} ')
+                        sub_node = algo.instantiate(idx=idx, dim=dim, num=num)[0]
+                        infer_span, infer_mem, train_span, train_mem = self.database.profile(sub_node)
+                        if isinstance(train_span, float): break
+                        num *= 2
+                if isinstance(train_span, float):
+                    break
+            assert isinstance(train_span, float), f"Failed to profile: {node}"
+            self.database.insert(node, infer_span * num, infer_mem * num, 
+                                 train_span * num, train_mem * num)
+            memory += train_mem * num
+            latency += train_span * num
         return latency, memory
 
     def save(self):

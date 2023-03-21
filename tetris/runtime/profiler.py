@@ -241,12 +241,14 @@ class ProfileDataBase:
         
         shapes = tuple(t.shape if isinstance(t, IRTensor) else None for t in node.inputs())
         dtypes = tuple(IRDType2TorchDType.map(t.dtype) if isinstance(t, IRTensor) else None for t in node.inputs())
+        color, default = '\033[31m', '\033[0m'
+        error = f'{color}Error{default}'
         print(
             f"profiled {node.signature} | shapes: {shapes} | dtypes: {dtypes} => "
-            f"infer: {round(infer_span, 2) if isinstance(infer_span, float) else 'Error'} ms | "
+            f"infer: {round(infer_span, 2) if isinstance(infer_span, float) else error} ms | "
             f"{infer_memory if isinstance(infer_memory, int) else None} bytes ; "
-            f"train: {round(train_span, 2) if isinstance(train_span, float) else 'Error'} ms | "
-            f"{train_memory if isinstance(train_memory, int) else 'Error'} bytes")
+            f"train: {round(train_span, 2) if isinstance(train_span, float) else error} ms | "
+            f"{train_memory if isinstance(train_memory, int) else error} bytes")
 
         if isinstance(device, int):
             torch.cuda.set_device(orig_device)
