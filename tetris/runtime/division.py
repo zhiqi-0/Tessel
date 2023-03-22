@@ -143,6 +143,8 @@ def DP(nodes: Tuple[IRLayerOp], k: int, s: int, tps: Callable,
         for d in range(1, min(k + 1, max_d + 1)):
             if mbs % d != 0: continue
             for t in range(1, min(k // d + 1, max_t + 1)):
+                # constraints: all devices must be used
+                if s == 1 and d * t != k: continue
                 # only search for gpu# of power of 2
                 if not is_of_power2(t * d): continue
                 # guarantee sub-problem searchable
