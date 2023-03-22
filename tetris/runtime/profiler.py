@@ -1,10 +1,8 @@
-
 from typing import Callable, Tuple, Union, Optional, Dict, NewType, List
 import torch
 import time
 import os
 import json
-import _operator
 
 import cube
 from cube.ir.cten import IRTensor, IRObject, IRCell
@@ -43,66 +41,41 @@ class CompProfiler:
         @return infer_mem int: the peak memory in bytes after inference of the function
         @return train_mem_info Tuple[int]: byte sizes of tensors saved for backward
         """
-        # create data
-        def dummy_torch_tensor(tensor: IRTensor):
-            """Generate dummy input tenosrs"""
-            dtype = IRDType2TorchDType.map(tensor.dtype)
-            constructor = torch.zeros if dtype in (torch.int64, torch.int32, torch.bool) else torch.rand
-            return constructor(tuple(tensor.shape), dtype=dtype, device=torch.cuda.current_device(), requires_grad=tensor.requires_grad)
-
-        args = []
-        for input in node.inputs():
-            if isinstance(input, IRTensor):
-                args.append(dummy_torch_tensor(input))
-            else:
-                args.append(input)
-
-        # replace kwargs starting with 'self.xxx'
-        train_kwargs, eval_kwargs = {}, {}
-        for name, value in node.kwargs.items():
-            if isinstance(value, str) and value.startswith('self.'):
-                train_val = getattr(_train_module_ref, value[5:])
-                eval_val = getattr(_eval_module_ref, value[5:])
-            else:
-                train_val = eval_val = value
-            train_kwargs[name] = train_val
-            eval_kwargs[name] = eval_val
+        torch.cuda.empty_cache()
+        print(f'current GPU memory: {torch.cuda.memory_allocated() / 1024 / 1024 / 1024} GB')
 
         func: Callable = CompProfiler.get_func(node)
+        args, kwargs = CompProfiler.get_inputs(node, train=True)
     
-        # run one sample
-        try:
-            with torch.no_grad():
-                outputs = func(*args, **eval_kwargs)
-        except Exception as e:
-            return e, e, e, e
+        # prepare gradients
+        with torch.no_grad():
+            outputs = func(*args, **kwargs)
         outputs = (outputs,) if torch.is_tensor(outputs) else outputs
         assert all(torch.is_tensor(otensor) for otensor in outputs), \
             f"{func.__name__}: require all the outputs to be tensors"
         grads = tuple(torch.zeros_like(otensor) for otensor in outputs)
+        del outputs
 
         def run_step(func, tensors, kwargs, backward: bool):
-            outputs = func(*tensors, **kwargs)
-            if backward:
+            if not backward:
+                with torch.no_grad():
+                    outputs = func(*tensors, **kwargs)
+            else:
+                outputs = func(*tensors, **kwargs)
                 torch.autograd.backward(outputs, grads)
-            return outputs
 
-        # profile inference peak memory
+        # ================ measure training peak memory ====================
+        # inference
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        try:
-            mtic = torch.cuda.max_memory_allocated()  # in bytes
-            with torch.no_grad():
-                run_step(func, args, eval_kwargs, backward=False)
-            mtoc = torch.cuda.max_memory_allocated()  # in bytes
-            infer_memory = mtoc - mtic
-        except Exception as e:
-            infer_memory = e
+        torch.cuda.reset_max_memory_allocated()
+        mtic = torch.cuda.max_memory_allocated()  # in bytes
+        run_step(func, args, kwargs, backward=False)
+        mtoc = torch.cuda.max_memory_allocated()
+        infer_memory = mtoc - mtic
 
-        train_memory = 0
-        used_tensor = set()
-        # ref torch/utils/checkpoint.py/_checkpoint_without_reentrant
+        # training
+        train_memory, used_tensor = 0, set()
         def pack_hook(x):
             nonlocal train_memory, used_tensor
             if x.storage().data_ptr() not in used_tensor:
@@ -112,52 +85,59 @@ class CompProfiler:
                     byte_size = byte_size * dim
                 train_memory += byte_size
             return x
-        
-        def unpack_hook(x):
-            return x
+        def unpack_hook(x): return x
 
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
-        try:
-            with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-                _ = run_step(func, args, train_kwargs, backward=True)
-        except Exception as e:
-            train_memory = e
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            run_step(func, args, kwargs, backward=True)
+
+        # for ptr in used_tensor:
+        #     torch.cuda.caching_allocator_delete(ptr)
+        del used_tensor
+
+        # ===================================================================
 
         # warmup
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
         tic = time.time()
         while time.time() - tic < warmup_sec:
-            if not isinstance(train_memory, Exception):
-                run_step(func, args, train_kwargs, backward=True)
-            elif not isinstance(infer_memory, Exception):
-                run_step(func, args, eval_kwargs, backward=False)
+            run_step(func, args, kwargs, backward=True)
             torch.cuda.synchronize()
 
-        def run_time(backward: bool):
+        def profile(backward: bool):
             torch.cuda.synchronize()
             tic = time.perf_counter()
             for _ in range(prof_times):
-                if backward:
-                    run_step(func, args, train_kwargs, backward=backward)
-                else:
-                    with torch.no_grad():
-                        run_step(func, args, eval_kwargs, backward=backward)
+                run_step(func, args, kwargs, backward=backward)
             torch.cuda.synchronize()
             toc = time.perf_counter()
-            span = (toc - tic) / prof_times * 1000 # in milliseconds
-            return span
+            return (toc - tic) / prof_times * 1000  # in milliseconds
 
-        # profile inference
-        infer_span = infer_memory
-        if not isinstance(infer_memory, Exception):
-            infer_span = run_time(False)
-
-        # profile train
-        train_span = train_memory
-        if not isinstance(train_memory, Exception):
-            train_span = run_time(True)
-
+        infer_span = profile(backward=False)
+        train_span = profile(backward=True)
+        
         return infer_span, infer_memory, train_span, train_memory
+
+    @staticmethod
+    def get_inputs(node: IRFwOperation, train: bool) -> Tuple[List, Dict]:
+        # create data
+        def dummy_torch_tensor(tensor: IRTensor):
+            """Generate dummy input tenosrs"""
+            dtype = IRDType2TorchDType.map(tensor.dtype)
+            constructor = torch.zeros if dtype in (torch.int64, torch.int32, torch.bool) else torch.rand
+            return constructor(tuple(tensor.shape), dtype=dtype, device=torch.cuda.current_device(), requires_grad=tensor.requires_grad)
+
+        args = [dummy_torch_tensor(t) if isinstance(t, IRTensor) else t for t in node.inputs()]
+        # replace kwargs starting with 'self.xxx'
+        kwargs = {}
+        for name, value in node.kwargs.items():
+            if isinstance(value, str) and value.startswith('self.'):
+                value = getattr(_train_module_ref, value[5:]) if train else getattr(_eval_module_ref, value[5:])
+            kwargs[name] = value
+        
+        return args, kwargs
 
     @staticmethod
     def get_func(node: IRFwOperation) -> Callable:
@@ -228,21 +208,22 @@ class ProfileDataBase:
         if isinstance(device, int):
             orig_device = torch.cuda.current_device()
             torch.cuda.set_device(device)
-        
-        param_mem = 0
-        for t in node.inputs():
-            if isinstance(t, IRTensor) and t.is_param():
-                param_mem += t.byte_size()
 
-        # run profiling
-        infer_span, infer_memory, train_span, train_memory = CompProfiler.profile(node)
-        # log to database
-        self.insert(node, infer_span, infer_memory, train_span, train_memory)
+        color, default = '\033[31m', '\033[0m'
+
+        #FIXME: OOM will increase cuda allocated memory
+        try:
+            infer_span, infer_memory, train_span, train_memory = CompProfiler.profile(node)
+            # log to database
+            self.insert(node, infer_span, infer_memory, train_span, train_memory)
+        except Exception as e:
+            err = f'{color}profil error:\n {str(e)}{default}'
+            print(err)
+            infer_span, infer_memory, train_span, train_memory = e, e, e, e
         
         shapes = tuple(t.shape if isinstance(t, IRTensor) else None for t in node.inputs())
         dtypes = tuple(IRDType2TorchDType.map(t.dtype) if isinstance(t, IRTensor) else None for t in node.inputs())
-        color, default = '\033[31m', '\033[0m'
-        error = f'{color}Error{default}'
+        error = f'{color}None{default}'
         print(
             f"profiled {node.signature} | shapes: {shapes} | dtypes: {dtypes} => "
             f"infer: {round(infer_span, 2) if isinstance(infer_span, float) else error} ms | "
@@ -353,7 +334,7 @@ class ProfileDataBase:
         e.g.,
             shapes: ((1024,), (1024,1024))
             dtypes: (torch.float32, torch.float32)
-        => (1024,)-(1024,1024) : torch.float32-torch.float32
+        => ((1024,), (1024,1024)) : (torch.float32, torch.float32)
 
         @param shapes Tuple[Tuple[int]]: the shape of each tensor
         @param dtypes Tuple[torch.dtype]: the dtype of each tensor
@@ -386,8 +367,10 @@ class ProfileDataBase:
         @return shapes_and_dtypes ShapesDTypes: shapes and dtypes
         """
         shapes, dtypes = key.split(' : ')
-        shapes = tuple(eval(shape) for shape in shapes.split('-'))
-        dtypes = tuple(eval(dtype) for dtype in dtypes.split('-'))
+        shapes = eval(shapes)
+        dtypes = eval(dtypes)
+        # shapes = tuple(eval(shape) for shape in shapes.split('-'))
+        # dtypes = tuple(eval(dtype) for dtype in dtypes.split('-'))
         return shapes, dtypes
 
     def dump(self, file: str, override=False):
