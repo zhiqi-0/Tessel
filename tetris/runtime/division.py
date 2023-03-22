@@ -30,35 +30,44 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
     """
     # return 1000, 1000  # Fake for debug
     # TODO: precise efficiency factor and memory preservation
-    tp_mem_efficiency = 1.0 + 0.15 * (t-1)
+    tp_mem_efficiency = 1.0 + 0.10 * (t-1)
     tp_com_efficienty = 1.0 + 0.10 * (t-1)
     mem_preserve = 2 * 1024 * 1024 * 1024 # 2GB
     assert t > 0 and d > 0 and inflight > 0
 
-    all_nodes = []
+    mem_limit -= mem_preserve
+
+    total_act_memory = 0
+    total_latency = 0
     for layer_op in nodes:
-        all_nodes += layer_op.nodes
-    nodes = all_nodes
+        latency, act_memory = estimator(layer_op.nodes, train=True)
+        # activation memory
+        act_memory = act_memory / (t * d) * tp_mem_efficiency
+        # recompute granularity: per stage
+        inflight = 1 if recompute else inflight
+        total_act_memory += act_memory * inflight
+
+        # recompute granularity: per layer
+        # total_act_memory = max(total_act_memory, act_memory) if recompute \
+        #     else total_act_memory + act_memory * inflight
+
+        # latency
+        if recompute:
+            latency = latency / 3 * 4  # suppose forward:backward=1:2
+        latency = latency / (t * d) * tp_com_efficienty
+        total_latency += latency
 
     # parameter size
     param_size = 0
-    for node in nodes:
-        for tensor in node.inputs():
-            if isinstance(tensor, IRTensor) and tensor.is_attr():
-                param_size += tensor.byte_size()
-
-    latency, memory = estimator(nodes, train=True)
-    act_memory = memory # - param_size
-    # memory
-    act_memory = act_memory / (t * d) * tp_mem_efficiency
-    param_size = param_size / t
-    # latency
-    latency = latency / (t * d)
-    latency *= tp_com_efficienty
-    inflight = 1 if recompute else inflight
+    for layer_op in nodes:
+        for node in layer_op.nodes:
+            for tensor in node.inputs():
+                if isinstance(tensor, IRTensor) and tensor.is_attr():
+                    param_size += tensor.byte_size()
     # consider gradient and adam optimizer (totally 3x param size)
-    memory = param_size * 4 + act_memory * inflight
-    return latency if memory < mem_limit-mem_preserve else None, memory
+    param_size = param_size * 4 / t
+    total_memory = param_size + total_act_memory
+    return total_latency if total_memory < mem_limit else None, total_memory
 
 
 def iter_subgraph(nodes: Tuple[IRLayerOp], s: int):
@@ -190,7 +199,7 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     """
     nodes: List[IRLayerOp] = cluster_to_layer_ops(nodes)
     nodes = tuple(nodes)
-    print(f'> search [search]: constructing dp tables...')
+    print(f'> search [search]: constructing dp tables ({len(nodes)} layer ops)...')
     tic = time.time()
     max_d = mbs if max_d is None else mbs
     max_d = min(max_d, mbs, ndevs)
@@ -208,6 +217,7 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
         if min_cost is None or tcost < min_cost:
             min_cost = tcost
             best_config = config[(nodes, ndevs, nstages)]
+    assert best_config is not None, f"no solution"
     toc = time.time()
     span = toc - tic
     print(f'> search [finish]: searching time: {span} s')

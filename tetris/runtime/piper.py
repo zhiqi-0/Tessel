@@ -26,7 +26,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
     @param graph IRGraph
     @param resource EnvResource
     @param nmicros int: number of microbatches
-    @param recompute bool: whether perform recompute
+    @param recompute bool: whether perform recompute stage-wisely
     @param tp_sprog Callable: sProgram of tensor parallelism.
         Takes graph, segment, tp_devs
 
@@ -60,6 +60,9 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     segments = graph.select(ntype=IRSegment, flatten=False)
     fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
+    if recompute:
+        for fseg in fsegments:
+            graph.recompute(fseg.nodes())
     assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
     devices = list(range(resource.ngpus))

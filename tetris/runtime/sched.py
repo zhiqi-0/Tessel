@@ -54,6 +54,7 @@ def tsched(graph: IRGraph, resource,
     """
     assert len(max_inflight_blks) == resource.ngpus, f"Only support for same device number"
     memory = resource.gpus[0].memory
+    print(f'> memory limit: {memory} bytes')
     micro = premise(graph, resource.ngpus, memory)
     assert not any(isinstance(node, IRFwOperation) for node in graph.nodes()), \
         "Premise should call graph.blocking() or graph.staging()"

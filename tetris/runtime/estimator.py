@@ -104,7 +104,7 @@ class Estimator:
         self.database.dump(self.cache_file, override=True)
 
     def special_rules(node, trials):
-        if node.name == 'window_attn':
-            h = node.anno.getlen('h')
-            trials = [(1, 0, min(h, 8))]
+        # if node.name == 'window_attn':
+        #     h = node.anno.getlen('h')
+        #     trials = [(1, 0, min(h, 4))]
         return trials
