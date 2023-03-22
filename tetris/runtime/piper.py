@@ -74,7 +74,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
         if dp == 1: continue
         else: assert False
 
-    assert len(devices) == 0
+    assert len(devices) == 0, f'not all devices are used (remaining {len(devices)})'
 
     dls = graph.select(ntype=IRDataOperation)
     assert len(dls) == 1, f"tp_sprog is not allowed to partition/replicate dataloader"
