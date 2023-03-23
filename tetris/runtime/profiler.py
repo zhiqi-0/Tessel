@@ -42,7 +42,7 @@ class CompProfiler:
         @return train_mem_info Tuple[int]: byte sizes of tensors saved for backward
         """
         torch.cuda.empty_cache()
-        print(f'current GPU memory: {torch.cuda.memory_allocated() / 1024 / 1024 / 1024} GB')
+        # print(f'current GPU memory: {torch.cuda.memory_allocated() / 1024 / 1024 / 1024} GB')
 
         func: Callable = CompProfiler.get_func(node)
         args, kwargs = CompProfiler.get_inputs(node, train=True)
@@ -68,9 +68,10 @@ class CompProfiler:
         # inference
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
         mtic = torch.cuda.max_memory_allocated()  # in bytes
         run_step(func, args, kwargs, backward=False)
+        torch.cuda.synchronize()
         mtoc = torch.cuda.max_memory_allocated()
         infer_memory = mtoc - mtic
 
@@ -91,6 +92,7 @@ class CompProfiler:
         torch.cuda.empty_cache()
         with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
             run_step(func, args, kwargs, backward=True)
+        torch.cuda.synchronize()
 
         # for ptr in used_tensor:
         #     torch.cuda.caching_allocator_delete(ptr)
