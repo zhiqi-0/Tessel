@@ -15,6 +15,7 @@ from examples.gpt.model import Config, GPT, GPTDataLoader
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
+from cube.codegen.schedule.schedule import ScheduleCodeGen
 
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
@@ -57,7 +58,7 @@ cube.init()
 print_each_rank(str(args), rank_only=0)
 
 fraction = 16 * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
-print(f'setting memory fraction: {fraction}')
+print_each_rank(f'> setting memory fraction: {fraction}')
 torch.cuda.set_per_process_memory_fraction(fraction)
 
 
@@ -124,8 +125,9 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     transformers = annotate_structure(graph)
     FW, BW = 'forward', 'backward'
     if args.recompute:
-        for transformer in transformers:
-            graph.recompute(transformer)
+        ScheduleCodeGen.recompute = True
+        # for transformer in transformers:
+        #     graph.recompute(transformer)
     
     nlayers_to_tp = 1
     full_tps, sub_tps = [], []
