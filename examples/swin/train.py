@@ -10,6 +10,10 @@ import torch
 import math
 from functools import partial
 
+fraction = 16 * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
+print(f'setting memory fraction: {fraction}')
+torch.cuda.set_per_process_memory_fraction(fraction)
+
 from examples.swin.blocks.attention import init_relative_position_index
 from examples.swin.model import Config, SwinTransformer, ImageDataLoader
 
@@ -59,7 +63,7 @@ parser.add_argument('--hidden', type=int, required=True,
 parser.add_argument('--heads', type=int, required=True,
                     help="the first stage number of head")
 # policy
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'profile'],
+parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper'],
                     help='premise shape')
 # log save
 parser.add_argument('--save', type=str, default=None,
@@ -145,7 +149,7 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
         for transformer in transformers:
             graph.recompute(transformer)
     
-    nlayers_to_tp = 2
+    nlayers_to_tp = 4
     full_tps, sub_tps = [], []
     for idx, layer_nodes in enumerate(transformers):
         if idx < nlayers_to_tp:
@@ -215,9 +219,7 @@ def train():
     dtype = torch.float16 if args.fp16 else torch.float32
     dataloader = ImageDataLoader(batch_size, cfg.img_size, cfg.num_classes, dtype=dtype)
 
-    if args.premise == 'profile':
-        runtime_policy = PASProfile
-    elif args.premise == 'piper':
+    if args.premise == 'piper':
         runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
                                  recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
     else:
