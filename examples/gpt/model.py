@@ -56,10 +56,13 @@ class GPT(torch.nn.Module):
             enc = layer(enc)
         enc = self.final_layernorm(enc)
 
-        logits = torch.nn.functional.linear(enc, self.embedw)
-        # simplify
-        loss = torch.sum(logits)
-        # loss = torch.sum(enc)
+        # ====> pretrain setting
+        # logits = torch.nn.functional.linear(enc, self.embedw)
+        # # simplify
+        # loss = torch.sum(logits)
+
+        # ===> finetune setting
+        loss = torch.sum(enc)
         return loss
 
 
