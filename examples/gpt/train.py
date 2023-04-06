@@ -88,9 +88,10 @@ def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     global stage_comp_cost
     FW, BW = 'forward', 'backward'
 
-    if args.recompute:
-        for transformer in transformers:
-            graph.recompute(transformer)
+    ScheduleCodeGen.recompute = True
+    # if args.recompute:
+    #     for transformer in transformers:
+    #         graph.recompute(transformer)
 
     pp_size = ndevs
 
@@ -124,10 +125,11 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """MShape schedule"""
     transformers = annotate_structure(graph)
     FW, BW = 'forward', 'backward'
-    if args.recompute:
-        ScheduleCodeGen.recompute = True
-        # for transformer in transformers:
-        #     graph.recompute(transformer)
+
+    ScheduleCodeGen.recompute = True
+    # if args.recompute:
+    #     for transformer in transformers:
+    #         graph.recompute(transformer)
     
     nlayers_to_tp = 1
     full_tps, sub_tps = [], []
