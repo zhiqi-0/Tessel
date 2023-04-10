@@ -4,7 +4,6 @@ set -ex
 GPU=V100
 PREMISE=piper
 
-
 #=============== micro-bench test =============#
 
 # 8 layer
@@ -89,53 +88,3 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
         --layers 16 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
         --db-cache gpt_${GPU}_db.json \
     >> gpt.$PREMISE.hidden4096.heads32.log
-
-#===============================================#
-
-
-
-
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 24 --hidden 2560 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json
-
-
-######### not work ###############
-
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 16 --premise piper --recompute \
-        --layers 32 --hidden 2560 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json
-
-
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 16 --premise mshape --recompute \
-        --layers 32 --hidden 2560 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json
-
-###################################
-
-
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise piper --recompute \
-        --layers 8 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt_hidden4096_heads32.log
-
-
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise mshape --recompute \
-        --layers 8 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    > gpt_hidden4096_heads32.log
