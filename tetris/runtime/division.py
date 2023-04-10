@@ -63,7 +63,12 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
         for node in layer_op.nodes:
             for tensor in node.inputs():
                 if isinstance(tensor, IRTensor) and tensor.is_attr():
-                    param_size += tensor.byte_size()
+                    factor = 1
+                    if node.name == 'embedding':
+                        vocab, hidden = node.input(1).shape
+                        if vocab >= 768000 and hidden >= 2560:
+                            factor = 1.5
+                    param_size += tensor.byte_size() * factor
     # consider gradient and adam optimizer (totally 3x param size)
     param_size = param_size * 4 / t
     total_memory = param_size + total_act_memory

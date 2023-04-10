@@ -57,7 +57,7 @@ def Piper(graph: IRGraph, resource, nmicros: int,
     print(f'> search [dump]: saving profiled database...')
     estimator.save()
 
-    min_cost, best_config = layer_division(nodes, resource.ngpus, tps, mbs, max_t=3)
+    min_cost, best_config = layer_division(nodes, resource.ngpus, tps, mbs, max_t=resource.ngpus-1)
 
     # ======================= instantiate plan ====================
 
