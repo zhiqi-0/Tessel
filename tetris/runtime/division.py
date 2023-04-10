@@ -183,7 +183,7 @@ def DP(nodes: Tuple[IRLayerOp], k: int, s: int, tps: Callable,
 
 
 def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: int, 
-                   max_d: Optional[int]=None, max_t: Optional[int]=None):
+                   max_d: Optional[int]=None, max_t: Optional[int]=None, max_p: Optional[int]=None):
     """
     DP algorithm to search for balanced pipeline stage divisions by considering
     tensor parallelism and pipeline parallelism.
@@ -210,13 +210,14 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     max_d = min(max_d, mbs, ndevs)
     max_t = ndevs if max_t is None else max_t
     max_t = min(max_t, ndevs)
+    max_p = ndevs if max_p is None else min(max_p, ndevs)
     cost, config = None, None
-    for nstages in range(1, ndevs+1):
+    for nstages in range(1, max_p+1):
         cost, config = DP(nodes, ndevs, nstages, tps, mbs, 
                           max_d, max_t, cost, config)
     print(f'> search [search]: getting optimal results...')
     min_cost, best_config = None, None
-    for nstages in range(1, ndevs+1):
+    for nstages in range(1, max_p+1):
         tcost = cost[(nodes, ndevs, nstages)]
         if tcost is None: continue
         if min_cost is None or tcost < min_cost:

@@ -55,7 +55,7 @@ def tsched(graph: IRGraph, resource,
     assert len(max_inflight_blks) == resource.ngpus, f"Only support for same device number"
     memory = resource.gpus[0].memory
     print(f'> memory limit: {memory} bytes')
-    micro = premise(graph, resource.ngpus, memory)
+    micro: TSched = premise(graph, resource.ngpus, memory)
     assert not any(isinstance(node, IRFwOperation) for node in graph.nodes()), \
         "Premise should call graph.blocking() or graph.staging()"
     
@@ -82,7 +82,8 @@ def tsched(graph: IRGraph, resource,
     
     # search
     # for nmicros in range(num_microbatches):
-    nmicros = resource.ngpus
+    nmicros = micro.ndevs
+    # nmicros = resource.ngpus
     micros: List[TSched] = [micro.copy(mid) for mid in range(nmicros)]
     # compose
     schedplans = Composer.compose(micros, max_inflight_blks)

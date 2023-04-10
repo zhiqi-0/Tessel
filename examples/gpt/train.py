@@ -145,7 +145,8 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
 
     estimator = Estimator(args.db_cache)
     tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
-    min_cost, best_config = layer_division(sub_tps, ndevs, tps, args.mbs, max_d=1, max_t=1)
+    min_cost, best_config = layer_division(
+        sub_tps, ndevs, tps, args.mbs, max_d=1, max_p=4)
 
     fstages = [full_tps] + [stage_nodes for stage_nodes, _, _ in best_config]
     graph.staging(tuple(stages[0] for stages in fstages))
@@ -159,16 +160,17 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     for devid, segment in enumerate(fsegments[1:]):
         graph.assign(segment, devid)
 
+    ndevs = len(fsegments) - 1
     sched = TSched(ndevs)
     # 
     fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
     fdevs = [[devid] for devid in range(ndevs)]
-    bblocks = [TBlock(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+    bblocks = [TBlock(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
     #
     fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))
     fdevs.insert(0, list(range(ndevs)))
-    bblocks.insert(len(bblocks), TBlock(0, span=2, memory=-1, btype=BW))
+    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=-1, btype=BW))
     bdevs.insert(len(bblocks), list(range(ndevs)))
 
     blocks = fblocks + bblocks
