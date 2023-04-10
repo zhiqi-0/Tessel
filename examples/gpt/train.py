@@ -32,6 +32,7 @@ from tetris.schedplan import Block as TBlock
 from tetris.runtime.piper import Piper
 
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description='SwinTransformer Train')
 parser.add_argument('--fp16', action='store_true', default=False)
@@ -57,9 +58,12 @@ args = parser.parse_args()
 cube.init()
 print_each_rank(str(args), rank_only=0)
 
-fraction = 16 * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
-print_each_rank(f'> setting memory fraction: {fraction}')
-torch.cuda.set_per_process_memory_fraction(fraction)
+
+MEM_LIMIT = os.environ.get('MEM_LIMIT', None)
+if MEM_LIMIT is not None:
+    fraction = int(MEM_LIMIT) * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
+    print_each_rank(f'> setting memory fraction: {fraction}')
+    torch.cuda.set_per_process_memory_fraction(fraction)
 
 
 # ========================= parallelisms =================================
