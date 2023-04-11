@@ -286,7 +286,6 @@ class SchedPlan:
 
     def loadstate(self, blocks: List[Block], devices: List[List[int]], state: np.ndarray):
         """Load the state from the state array"""
-        assert len(blocks) == state.shape[0] * state.shape[1]
         getblock, getdevice = {}, {}
         for blk, devs in zip(blocks, devices):
             getblock[(blk.mid, blk.gid)] = blk
