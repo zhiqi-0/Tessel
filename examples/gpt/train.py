@@ -73,7 +73,7 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
     ndevs = len(devs)
     for fnode in segment.select(ntype=IRFwOperation):
         if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
-        if fnode.name == 'embedding':
+        if fnode.name == 'embedding' and fnode.input(1).shape[0] > 10240:
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         elif fnode.name == 'self_attention' or fnode.name == 'feedforward':
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
