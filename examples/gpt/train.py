@@ -74,7 +74,15 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
     for fnode in segment.select(ntype=IRFwOperation):
         if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
         if fnode.name == 'embedding' and fnode.input(1).shape[0] > 10240:
-            tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
+            if args.premise == 'mshape':
+                if len(devs) > 8:
+                    assert len(devs) % 2 == 0
+                    pdevs = len(devs) // 2
+                    embeds = graph.replicate(fnode, times=2)
+                    tp(graph, embeds[0], devs[:pdevs], idx=1, dim=0, num=pdevs)
+                    tp(graph, embeds[1], devs[pdevs:], idx=1, dim=0, num=pdevs)
+            else:
+                tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         elif fnode.name == 'self_attention' or fnode.name == 'feedforward':
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         elif fnode.name == 'linear':  # the last embedding linear
