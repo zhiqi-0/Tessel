@@ -1,7 +1,9 @@
 from typing import Union, List, Dict, Callable, Optional
 import time
 import os
+import torch
 
+from cube.runtime.device import DeviceGroup
 from cube.ir.operator import IRFwOperation, IRDataOperation
 from cube.graph.graph import IRGraph, IRSegment
 from cube.graph.schedule.schedplan import SchedulePlan as CSched
@@ -86,9 +88,35 @@ def tsched(graph: IRGraph, resource,
     # nmicros = resource.ngpus
     micros: List[TSched] = [micro.copy(mid) for mid in range(nmicros)]
     # compose
-    schedplans = Composer.compose(micros, max_inflight_blks)
-    assert len(schedplans) > 0, f"No schedule solution"
-    tsched = schedplans[0]
+    # schedplans = Composer.compose(micros, max_inflight_blks)
+    # assert len(schedplans) > 0, f"No schedule solution"
+    # tsched = schedplans[0]
+
+    # due to non-deterministic behavior of z3-solver across nodes,
+    # we follow a same plan from rank 0
+    if DeviceGroup().rank == 0:
+        schedplans = Composer.compose(micros, max_inflight_blks)
+        assert len(schedplans) > 0, f"No schedule solution"
+        tsched = schedplans[0]
+        state = tsched.getstate()
+        for rank in range(8, DeviceGroup().world_size, 8):
+            torch.distributed.send(
+                torch.tensor(state, dtype=torch.int).cuda(), rank)
+        print(f'> get composed schedule:\n{tsched}')
+    else:
+        print('> waiting compose result from global rank 0...')
+        blocks, devices = [], []
+        for micro in micros:
+            for blk in micro.all_blocks():
+                blocks.append(blk)
+                devices.append(micro.device(blk))
+        state = torch.empty((nmicros, micro.ndevs), dtype=torch.int).cuda()
+        torch.distributed.recv(state, 0)
+        torch.cuda.synchronize()
+        state = state.cpu().numpy()
+        tsched = TSched(micro.ndevs)
+        tsched.loadstate(blocks, devices, state)
+        print(f'> get composed schedule:\n{tsched}')
 
     csched = schedule(graph, tsched, num_microbatches, block2seg)
     # print(f'> {csched}')

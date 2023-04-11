@@ -1,5 +1,6 @@
 from typing import Dict, Set, Tuple, List, Optional
 import json
+import numpy as np
 
 import more_itertools
 
@@ -265,8 +266,36 @@ class SchedPlan:
             dscp += '\n'
         return dscp
 
-    def save(filename: str):
-        pass
+    def getstate(self) -> np.ndarray:
+        """
+        return state format: 2-D array of (M, N+2) shape,
+        where M is number of microbatches, N is number of sub-graphs.
+        
+        (i, j) in (M, N) denotes the start time of block gid j of microbatch i 
+        (*, N+1) and (*, N+2) denotes the start and end of the repetend, respectively.
+        """
+        nmicros = max(blk.mid for blk in self._blocks) + 1
+        nstages = max(blk.gid for blk in self._blocks) + 1
+        state = -np.ones((nmicros, nstages+2), dtype=int)
+        for blk in self._blocks:
+            step = self.step(blk)
+            state[blk.mid, blk.gid] = step
+        state[:,-2:] = self.repetend
+        assert np.all(state >= 0)
+        return state
+
+    def loadstate(self, blocks: List[Block], devices: List[List[int]], state: np.ndarray):
+        """Load the state from the state array"""
+        getblock, getdevice = {}, {}
+        for blk, devs in zip(blocks, devices):
+            getblock[(blk.mid, blk.gid)] = blk
+            getdevice[blk] = devs
+        self.repetend = tuple(state[0,-2:])
+        for mid in range(state.shape[0]):
+            for gid in range(state.shape[1]):
+                step = state[mid, gid]
+                block = [(mid, gid)]
+                self.add_block(block, getdevice[block], step)
 
     @staticmethod
     def load(filename: str):
