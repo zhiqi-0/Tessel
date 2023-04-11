@@ -110,7 +110,7 @@ def tsched(graph: IRGraph, resource,
             for blk in micro.all_blocks():
                 blocks.append(blk)
                 devices.append(micro.device(blk))
-        state = torch.empty((nmicros, micro.ndevs), dtype=torch.int).cuda()
+        state = torch.empty((nmicros, len(micro.all_blocks())), dtype=torch.int).cuda()
         torch.distributed.recv(state, 0)
         torch.cuda.synchronize()
         state = state.cpu().numpy()
