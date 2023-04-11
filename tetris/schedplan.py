@@ -294,7 +294,7 @@ class SchedPlan:
         for mid in range(state.shape[0]):
             for gid in range(state.shape[1]):
                 step = state[mid, gid]
-                block = [(mid, gid)]
+                block = getblock[(mid, gid)]
                 self.add_block(block, getdevice[block], step)
 
     @staticmethod
