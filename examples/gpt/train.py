@@ -157,8 +157,15 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     tp_devs = list(range(ndevs))
     stage_tp(graph, fsegments[0], tp_devs)
 
-    for devid, segment in enumerate(fsegments[1:]):
-        graph.assign(segment, devid)
+    curr_devs = 0
+    for segment, (_, dp, tp) in zip(fsegments[1:], best_config):
+        stage_ndevs = dp * tp
+        if stage_ndevs > 1:
+            stage_tp(graph, segment, 
+                     list(range(curr_devs, curr_devs + stage_ndevs)))
+        else:
+            graph.assign(segment, curr_devs)
+        curr_devs += stage_ndevs
 
     ndevs = len(fsegments) - 1
     sched = TSched(ndevs)
