@@ -292,7 +292,7 @@ class SchedPlan:
             getdevice[blk] = devs
         self.repetend = tuple(state[0,-2:])
         for mid in range(state.shape[0]):
-            for gid in range(state.shape[1]):
+            for gid in range(state.shape[1]-2):
                 step = state[mid, gid]
                 block = getblock[(mid, gid)]
                 self.add_block(block, getdevice[block], step)
