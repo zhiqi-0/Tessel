@@ -157,15 +157,14 @@ class SchedPlan:
             assert blk.gid is not None
             all_blocks[(blk.gid, blk.mid)] = blk
     
-        def get_block(mid: int, gid: int) -> Block:
+        def get_block(gid: int, mid: int) -> Block:
             ref = all_blocks[(gid, 0)]
             return all_blocks.setdefault(
                 (gid, mid), Block(mid, ref.span ,ref.memory, ref.btype, gid))
 
-        in_repetend = lambda blk: rstart <= self.step(blk) and self.step(blk) < rend
+        in_repetend = lambda blk: blk in self._blocks and rstart <= self.step(blk) and self.step(blk) < rend
 
         # get repetend offset
-        roffset = 0
         dev_span = []
         for devid in range(self.ndevs):
             blocks = [blk for blk in self._blocks if devid in self.device(blk)]
@@ -173,28 +172,31 @@ class SchedPlan:
             maxstep = max(self.step(blk) + blk.span for blk in blocks)
             minstep = min(self.step(blk) for blk in blocks)
             dev_span.append(maxstep - minstep)
+        rspan = max(dev_span)
 
-            ofst = 0
-            for blk in blocks:
+        rofst = 0
+        for devid in range(self.ndevs):
+            blocks = [blk for blk in self._blocks if devid in self.device(blk)]
+            blocks = [blk for blk in blocks if in_repetend(blk)]
+            for block in blocks:
                 # after blocks
-                ablocks = list(blk.after)
+                ablocks = list(block.after)
                 keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
                 ablocks = [get_block(*key) for key in keys]
-                ablocks = [blk for blk in ablocks if blk in self._blocks]
-                astarts = [self.step(blk) for blk in ablocks if in_repetend(blk)]
+                ablocks = [blk for blk in ablocks if in_repetend(blk)]
+                astarts = [self.step(blk) for blk in ablocks]
                 if len(astarts) != 0:
-                    min_start = min(astarts) - maxstep
-                    ofst = max((ofst, min_start))
+                    min_ofst = min(astarts) - self.step(block) - rspan
+                    rofst = max(rofst, min_ofst)
                 # before blocks
-                bblocks = list(blk.before)
-                keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
+                bblocks = list(block.before)
+                keys = [(blk.gid, blk.mid + 1) for blk in bblocks]
                 bblocks = [get_block(*key) for key in keys]
-                bblocks = [blk for blk in bblocks if blk in self._blocks]
-                bends = [self.step(blk) + blk.span for blk in bblocks if in_repetend(blk)]
+                bblocks = [blk for blk in bblocks if in_repetend(blk)]
+                bends = [self.step(blk) + blk.span for blk in bblocks]
                 if len(bends) != 0:
-                    min_start = max(bends) - maxstep
-                    ofst = max(ofst, min_start)
-            roffset = max(ofst, roffset)
+                    min_ofst = max(bends) - self.step(block) - rspan
+                    rofst = max(rofst, min_ofst)
 
         unrolled_plan = SchedPlan(self.ndevs)
 
@@ -203,16 +205,16 @@ class SchedPlan:
             blocks = self.blocks(step)
             for block in blocks:
                 unrolled_plan.add_block(block, self.device(block), step)
-        
+
         # steady
         rspan = max(dev_span)
         for mid_ofst in range(nmicros-nmids+1):
             for step in range(rstart, rend):
                 for blk in self.blocks(step):
-                    rblk = get_block(blk.mid + mid_ofst, blk.gid)
+                    rblk = get_block(blk.gid, blk.mid + mid_ofst)
                     unrolled_plan.add_block(
                         rblk, self.device(blk),
-                        step + (rspan + roffset) * mid_ofst
+                        step + (rspan + rofst) * mid_ofst
                     )
 
         # cooldown
@@ -220,12 +222,12 @@ class SchedPlan:
         for step in range(rend, self.nsteps):
             for blk in self.blocks(step):
                 unrolled_plan.add_block(
-                    get_block(blk.mid + mid_ofst, blk.gid), 
+                    get_block(blk.gid, blk.mid + mid_ofst), 
                     self.device(blk),
-                    step + (rspan + roffset) * mid_ofst
+                    step + (rspan + rofst) * mid_ofst
                 )
         
-        unrolled_plan.repetend = (rstart, rend + (rspan + roffset) * mid_ofst)
+        unrolled_plan.repetend = (rstart, rend + (rspan + rofst) * mid_ofst)
         return unrolled_plan
 
     def copy(self, mid_offset: Optional[int] = 0):

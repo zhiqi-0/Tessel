@@ -245,50 +245,101 @@ class BubbleOptimalSolver(SolverBase):
         """
         Bubble number is defined as summation of empty steps
         between consecutive blocks of a device.
+
+        [----]      [----]   
+        [----]  ->   [----]  Note: this will cause no bubble if not consider dependency
+        [----]     [----]    
+
+        Calculation:
+            get max span (from start computation to the end of computation) among all devices
+            inner_bubble = max_span - real_span
+            outer_bubble = minimal offset in waiting dependency
+            bubble = inner_bubble + outer_bubble
         """
         self._nbubbles = 0
-        dev_bubbles = [0] * self.ndevs
 
         gid_mid_blocks: Dict[Tuple[int, int], Block] = {}
         for block in self._blocks:
             if block.gid is None: continue
             gid_mid_blocks[(block.gid, block.mid)] = block
 
+        dev_span = []
+        dev_step = []
         for devid in range(self.ndevs):
-            # device bubble = internal empty slots + tail must wait slots
             blocks = [blk for blk in self._blocks if devid in self.device(blk)]
             # [min start-step, max end-step)
             minstep = _z3_min([self.step(block) for block in blocks])
             maxstep = _z3_max([self.step(block) + block.span for block in blocks])
             span = maxstep - minstep
-            # get internal empty slots
-            total_steps = sum(blk.span for blk in blocks)
-            dev_bubbles[devid] = span - total_steps
-            # get tail must wait slots: check dependency on the next repetend
-            ofst = 0
+            dev_span.append(span)
+            dev_step.append(sum(blk.span for blk in blocks))
+        rspan = _z3_max(dev_span)
+
+        rofst = 0
+        for devid in range(self.ndevs):
+            blocks = [blk for blk in self._blocks if devid in self.device(blk)]
             for block in blocks:
                 # after blocks
-                ablocks = [blk for blk in block.after]
+                ablocks = list(block.after)
                 keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
                 ablocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
                 astarts = [self.step(blk) for blk in ablocks]
                 if len(astarts) != 0:
-                    min_start = _z3_min(astarts) - maxstep
-                    ofst = _z3_max([ofst, min_start])
-    
+                    min_ofst = _z3_min(astarts) - self.step(block) - rspan
+                    rofst = _z3_max([rofst, min_ofst])
                 # before blocks
-                bblocks = [blk for blk in block.before]
+                bblocks =  list(block.before)
                 keys = [(blk.gid, blk.mid + 1) for blk in bblocks]
                 bblocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
                 bends = [self.step(blk) + blk.span for blk in bblocks]
                 if len(bends) != 0:
-                    min_start = _z3_max(bends) - maxstep
-                    ofst = _z3_max([ofst, min_start])
+                    min_ofst = _z3_max(bends) - self.step(block) - rspan
+                    rofst = _z3_max([rofst, min_ofst])
+        
+        dev_bubbles = []
+        for devid in range(self.ndevs):
+            nbubbles = rspan - dev_step[devid] + rofst
+            dev_bubbles.append(nbubbles)
+        
+        self._nbubbles = _z3_max(dev_bubbles)
 
-            dev_bubbles[devid] += ofst
 
-        for bubble in dev_bubbles:
-            self._nbubbles = z3.If(z3.And(bubble >= self._nbubbles), bubble, self._nbubbles)
+        # dev_bubbles = [0] * self.ndevs
+        # for devid in range(self.ndevs):
+        #     # device bubble = internal empty slots + tail must wait slots
+        #     blocks = [blk for blk in self._blocks if devid in self.device(blk)]
+        #     # [min start-step, max end-step)
+        #     minstep = _z3_min([self.step(block) for block in blocks])
+        #     maxstep = _z3_max([self.step(block) + block.span for block in blocks])
+        #     span = maxstep - minstep
+        #     # get internal empty slots
+        #     total_steps = sum(blk.span for blk in blocks)
+        #     dev_bubbles[devid] = span - total_steps
+        #     # get tail must wait slots: check dependency on the next repetend
+        #     ofst = 0
+        #     for block in blocks:
+        #         # after blocks
+        #         ablocks = [blk for blk in block.after]
+        #         keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
+        #         ablocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
+        #         astarts = [self.step(blk) for blk in ablocks]
+        #         if len(astarts) != 0:
+        #             min_start = _z3_min(astarts) - maxstep
+        #             ofst = _z3_max([ofst, min_start])
+        # 
+        #         # before blocks
+        #         bblocks = [blk for blk in block.before]
+        #         keys = [(blk.gid, blk.mid + 1) for blk in bblocks]
+        #         bblocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
+        #         bends = [self.step(blk) + blk.span for blk in bblocks]
+        #         if len(bends) != 0:
+        #             min_start = _z3_max(bends) - maxstep
+        #             ofst = _z3_max([ofst, min_start])
+        # 
+        #     dev_bubbles[devid] += ofst
+        # 
+        # for bubble in dev_bubbles:
+        #     self._nbubbles = z3.If(z3.And(bubble >= self._nbubbles), bubble, self._nbubbles)
 
     def stride(self):
         """
