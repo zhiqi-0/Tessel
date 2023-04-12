@@ -7,12 +7,16 @@ The implementation is a little bit adapted to fit with cube's view
 """
 from typing import List, Callable, Tuple, Dict, Optional
 import time
+import os
 
 from cube.ir.cten import IRTensor
 from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
 
 from tetris.runtime.layer_op import IRLayerOp, cluster_to_layer_ops
+
+
+PARAM_LIMIT = os.environ.get('PARAM_LIMIT', None)  # in GB
 
 
 def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
@@ -69,6 +73,9 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
     # consider gradient and adam optimizer (totally 3x param size)
     param_size = param_size * 4 / t
     total_memory = param_size + total_act_memory
+    if PARAM_LIMIT is not None:
+        if param_size >= int(PARAM_LIMIT) * 1024 * 1024 * 1024:
+            return None, total_memory
     return total_latency if total_memory < mem_limit else None, total_memory
 
 
