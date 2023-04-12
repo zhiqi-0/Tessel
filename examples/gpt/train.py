@@ -190,7 +190,7 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     # 
     fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
     fdevs = [[devid] for devid in range(ndevs)]
-    bblocks = [TBlock(0, span=3 if args.recomute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
+    bblocks = [TBlock(0, span=3 if args.recompute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
     #
     fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))
