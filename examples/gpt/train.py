@@ -94,6 +94,12 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
 
 
 def full_tp(graph: IRGraph, resource):
+
+    transformers = annotate_structure(graph)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
+
     devs = list(range(resource.ngpus))
     stage_tp(graph, graph, devs)
     for dl in graph.select(ntype=IRDataOperation):
@@ -105,14 +111,11 @@ def full_tp(graph: IRGraph, resource):
 def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """1F1B schedule"""
     transformers = annotate_structure(graph)
-
-    global stage_comp_cost
     FW, BW = 'forward', 'backward'
 
-    ScheduleCodeGen.recompute = True
-    # if args.recompute:
-    #     for transformer in transformers:
-    #         graph.recompute(transformer)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
 
     pp_size = ndevs
 
@@ -145,12 +148,9 @@ def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
 def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """MShape schedule"""
     transformers = annotate_structure(graph)
-    FW, BW = 'forward', 'backward'
-
-    ScheduleCodeGen.recompute = True
-    # if args.recompute:
-    #     for transformer in transformers:
-    #         graph.recompute(transformer)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
     
     nlayers_to_tp = 1
     full_tps, sub_tps = [], []
@@ -184,12 +184,13 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
             graph.assign(segment, curr_devs)
         curr_devs += stage_ndevs
 
+    FW, BW = 'forward', 'backward'
     ndevs = len(fsegments) - 1
     sched = TSched(ndevs)
     # 
     fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
     fdevs = [[devid] for devid in range(ndevs)]
-    bblocks = [TBlock(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+    bblocks = [TBlock(0, span=3 if args.recomute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
     #
     fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))

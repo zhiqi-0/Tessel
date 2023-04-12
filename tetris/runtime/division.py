@@ -44,12 +44,12 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
         # activation memory
         act_memory = act_memory / (t * d) * tp_mem_efficiency
         # recompute granularity: per stage
-        inflight = 1 if recompute else inflight
-        total_act_memory += act_memory * inflight
+        # inflight = 1 if recompute else inflight
+        # total_act_memory += act_memory * inflight
 
         # recompute granularity: per layer
-        # total_act_memory = max(total_act_memory, act_memory) if recompute \
-        #     else total_act_memory + act_memory * inflight
+        total_act_memory = max(total_act_memory, act_memory) if recompute \
+            else total_act_memory + act_memory * inflight
 
         # latency
         if recompute:

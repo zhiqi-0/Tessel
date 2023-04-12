@@ -38,7 +38,10 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     @return graph IRGraph
     """
-    annotate_structure(graph)
+    transformers = annotate_structure(graph)
+    if recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
     nodes = tuple(graph.select(ntype=IRFwOperation))
 
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
@@ -66,10 +69,6 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     segments = graph.select(ntype=IRSegment, flatten=False)
     fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
-    ScheduleCodeGen.recompute = recompute
-    # if recompute:
-    #     for fseg in fsegments:
-    #         graph.recompute(fseg.nodes())
     assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
     devices = list(range(resource.ngpus))
