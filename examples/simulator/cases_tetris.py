@@ -163,13 +163,38 @@ class Premise:
         # 
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
         fdevs = [[devid] for devid in range(ndevs)]
-        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
         #
         fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
-        bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
+        bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
         bdevs.insert(len(bblocks), list(range(ndevs)))
+    
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
+
+    @staticmethod
+    def mshape_imbalance(ndevs: int) -> SchedPlan:
+        """
+        f f             b b
+            f         b    
+        f     f     b     b
+                f b        
+        """
+        sched = SchedPlan(ndevs)
+        # 
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        #
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fdevs.insert(0, list(range(0, ndevs, 2)))
+        bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
+        bdevs.insert(len(bblocks), list(range(0, ndevs, 2)))
 
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
