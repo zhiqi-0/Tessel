@@ -20,7 +20,7 @@ from cube.codegen.schedule.schedule import ScheduleCodeGen
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
 from cube.graph.function.anchor import IRGraphAnchor
-from cube.ir.operator import IRFwOperation
+from cube.ir.operator import IRFwOperation, IRDataOperation
 from cube.runtime.device import DeviceGroup
 
 from tetris.runtime.utils import tp, replica, annotate_structure
@@ -45,7 +45,7 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper'],
+parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'tp'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -91,6 +91,14 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
         else:
             replica(graph, fnode, devs)
     return segment
+
+
+def full_tp(graph: IRGraph, resource):
+    devs = list(range(resource.ngpus))
+    stage_tp(graph, graph, devs)
+    for dl in graph.select(ntype=IRDataOperation):
+        replica(graph, dl, devs)
+    return graph
 
 # ========================= parallelisms =================================
 
@@ -215,6 +223,8 @@ def train():
     if args.premise == 'piper':
         runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
                                  recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
+    elif args.premise == 'tp':
+        runtime_policy = full_tp
     else:
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
