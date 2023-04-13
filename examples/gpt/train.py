@@ -51,6 +51,8 @@ parser.add_argument('--recompute', action='store_true', default=False)
 # log save
 parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
+parser.add_argument('--load-tsched', type=str, default=None,
+                    help='load searched tetris schedule from file')
 parser.add_argument('--db-cache', type=str, default='gpt_db.json',
                     help='profiled database save file')
 args = parser.parse_args()
@@ -193,9 +195,9 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     bblocks = [TBlock(0, span=3 if args.recompute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
     #
-    fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))
+    fblocks.insert(0, TBlock(0, span=1, memory=0, btype=FW))
     fdevs.insert(0, list(range(ndevs)))
-    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=-1, btype=BW))
+    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=0, btype=BW))
     bdevs.insert(len(bblocks), list(range(ndevs)))
 
     blocks = fblocks + bblocks
@@ -230,7 +232,8 @@ def train():
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
                                  premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
-                                 max_inflight_blks = [8] * DeviceGroup().world_size,
+                                 max_inflight_blks = [10] * DeviceGroup().world_size,
+                                 load_plan=args.load_tsched,
                                  save_dir=args.save)
 
     model = cube.SemanticModel(model)
