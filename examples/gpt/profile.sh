@@ -2,7 +2,7 @@
 set -ex
 
 GPU=V100
-
+VOCAB=768000
 
 # default vocab size: 51.2K
 # if name == '350M':
@@ -27,7 +27,7 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 8 --hidden 2560 --heads 32 --seqlen 2048 --vocab 512000 \
+        --layers 2 --hidden 2560 --heads 32 --seqlen 2048 --vocab $VOCAB \
         --db-cache gpt_${GPU}_db.json
 
 
@@ -35,7 +35,7 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 8 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
+        --layers 2 --hidden 4096 --heads 32 --seqlen 2048 --vocab $VOCAB \
         --db-cache gpt_${GPU}_db.json
 
 
@@ -43,7 +43,7 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 8 --hidden 5120 --heads 40 --seqlen 2048 --vocab 512000 \
+        --layers 2 --hidden 5120 --heads 32 --seqlen 2048 --vocab $VOCAB \
         --db-cache gpt_${GPU}_db.json
 
 
@@ -51,5 +51,5 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 8 --hidden 8192 --heads 64 --seqlen 2048 --vocab 512000 \
+        --layers 2 --hidden 8192 --heads 64 --seqlen 2048 --vocab $VOCAB \
         --db-cache gpt_${GPU}_db.json
