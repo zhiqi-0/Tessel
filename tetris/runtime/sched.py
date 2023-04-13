@@ -40,6 +40,7 @@ def tsched(graph: IRGraph, resource,
            num_microbatches: int,
            premise: Callable[[IRGraph, int], TSched],
            max_inflight_blks: List[int],
+           load_plan: Optional[str] = None,
            save_dir: Optional[str] = None) -> IRGraph:
     """
     Compile policy in cube.
@@ -84,10 +85,11 @@ def tsched(graph: IRGraph, resource,
     
     # search
     # for nmicros in range(num_microbatches):
-    nmicros = micro.ndevs
+    nmicros = micro.ndevs + 2
     # nmicros = resource.ngpus
     micros: List[TSched] = [micro.copy(mid) for mid in range(nmicros)]
-    # compose
+
+    # single-node compose
     # schedplans = Composer.compose(micros, max_inflight_blks)
     # assert len(schedplans) > 0, f"No schedule solution"
     # tsched = schedplans[0]
@@ -95,13 +97,18 @@ def tsched(graph: IRGraph, resource,
     # due to non-deterministic behavior of z3-solver across nodes,
     # we follow a same plan from rank 0
     if DeviceGroup().rank == 0:
-        schedplans = Composer.compose(micros, max_inflight_blks)
-        assert len(schedplans) > 0, f"No schedule solution"
-        tsched = schedplans[0]
+        if load_plan is not None:
+            print(f'> loading schedule plan from {load_plan}')
+            tsched = TSched.load(load_plan)
+        else:
+            schedplans = Composer.compose(micros, max_inflight_blks)
+            assert len(schedplans) > 0, f"No schedule solution"
+            tsched = schedplans[0]
+            print(f'> saving searched plan in tsched.json...')
+            tsched.save('tsched.json')
         state = tsched.getstate()
         for rank in range(8, DeviceGroup().world_size, 8):
-            torch.distributed.send(
-                torch.tensor(state, dtype=torch.int).cuda(), rank)
+            torch.distributed.send(torch.tensor(state, dtype=torch.int).cuda(), rank)
         print(f'> get composed schedule:\n{tsched}')
     else:
         print('> waiting compose result from global rank 0...')

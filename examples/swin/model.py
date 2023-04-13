@@ -8,8 +8,6 @@ from examples.swin.blocks.patch import PatchEmbed, PatchMerging
 import cube
 from dataclasses import dataclass
 
-from tetris.runtime.utils import profile_start, profile_stop
-
 
 def trunc_normal_(tensor: torch.Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.):
     with torch.no_grad():

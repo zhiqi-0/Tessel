@@ -299,6 +299,28 @@ class SchedPlan:
                 block = getblock[(mid, gid)]
                 self.add_block(block, getdevice[block], step)
 
+    def save(self, filename: str):
+        """
+        save the schedule plan to a json file
+        """
+        plans = {
+            'ndevs': self.ndevs,
+            'blocks': [],
+            'repetend': self.repetend
+        }
+        for block in self._blocks:
+            plans['blocks'].append({
+                'mid': block.mid,
+                'span': block.span,
+                'memory': block.memory,
+                'btype': block.btype,
+                'gid': block.gid,
+                'step': self.step(block),
+                'device': self.device(block)
+            })
+        with open(filename, 'w') as f:
+            json.dump(plans, f)
+
     @staticmethod
     def load(filename: str):
         with open(filename, 'r') as f:
@@ -319,6 +341,7 @@ class SchedPlan:
                 Block(mid, span, memory, btype, gid),
                 device, start
             )
+        schedplan.repetend = tuple(plan['repetend'])
         return schedplan
 
     @staticmethod

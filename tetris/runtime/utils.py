@@ -77,27 +77,6 @@ class MemoryProfiler:
         return getattr(self.instance, name)
 
 
-@cube.graph.parser.register('* -> *')
-@torch.jit.ignore
-def profile_start(dummy: torch.Tensor, s: str, idx: int):
-    from cube.profiler.timer import CudaTimer
-    from tetris.runtime.utils import MemoryProfiler
-    field = s + str(idx)
-    CudaTimer().start(field)
-    MemoryProfiler().start(field)
-    return dummy
-
-@cube.graph.parser.register('* -> *')
-@torch.jit.ignore
-def profile_stop(dummy: torch.Tensor, s: str, idx: int):
-    from cube.profiler.timer import CudaTimer
-    from tetris.runtime.utils import MemoryProfiler
-    field = s + str(idx)
-    CudaTimer().stop(field)
-    MemoryProfiler().stop(field)
-    return dummy
-
-
 def layer_division_rules(nstages: int, block_comp_cost: List[float],
                          adaptive: bool = True,
                          limits: Tuple[int] = None) -> List[Tuple[int, int]]:
