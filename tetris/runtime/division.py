@@ -14,6 +14,7 @@ from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
 
 from tetris.runtime.layer_op import IRLayerOp, cluster_to_layer_ops
+from tetris.runtime.flags import SearchFlag
 
 
 PARAM_LIMIT = os.environ.get('PARAM_LIMIT', None)  # in GB
@@ -68,13 +69,14 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
             for tensor in node.inputs():
                 if isinstance(tensor, IRTensor) and tensor.is_attr():
                     # too large weight will bring memory fragment
-                    factor = 1 if tensor.byte_size() // t <= 1.5 * 1024 * 1024 * 1024 else 1.5
+                    factor = 1 # if tensor.byte_size() // t <= 1.5 * 1024 * 1024 * 1024 else 1.5
                     param_size += tensor.byte_size() * factor
     # consider gradient and adam optimizer (totally 3x param size)
     param_size = param_size * 4 / t
     total_memory = param_size + total_act_memory
-    if PARAM_LIMIT is not None:
-        if param_size >= int(PARAM_LIMIT) * 1024 * 1024 * 1024:
+    # only apply to stage with layer 0 if param limit is set
+    if SearchFlag.param_limit is not None and nodes[0].layer_id == 0:
+        if param_size >= SearchFlag.param_limit * 1024 * 1024 * 1024:
             return None, total_memory
     return total_latency if total_memory < mem_limit else None, total_memory
 
