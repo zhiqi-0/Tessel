@@ -236,7 +236,8 @@ def train():
                                  save_dir=args.save)
 
     model = cube.SemanticModel(model)
-    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False)
+    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 
+                  comm_cost_fn=lambda x: 1)
     def train_iter(model, dataloader):
         datas = next(dataloader)
         loss = model(*datas)
