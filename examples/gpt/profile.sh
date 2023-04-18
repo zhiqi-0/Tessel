@@ -2,7 +2,7 @@
 set -ex
 
 GPU=V100
-VOCAB=768000
+VOCAB=1024000
 
 # default vocab size: 51.2K
 # if name == '350M':
@@ -44,6 +44,14 @@ PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
         --layers 2 --hidden 5120 --heads 32 --seqlen 2048 --vocab $VOCAB \
+        --db-cache gpt_${GPU}_db.json
+
+
+PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
+    --nproc_per_node=4 \
+    examples/gpt/train.py \
+        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
+        --layers 2 --hidden 6144 --heads 48 --seqlen 2048 --vocab $VOCAB \
         --db-cache gpt_${GPU}_db.json
 
 

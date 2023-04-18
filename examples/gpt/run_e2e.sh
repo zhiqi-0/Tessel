@@ -9,8 +9,8 @@ mkdir -p $LOGS
 GPU=V100
 
 # model arch
-LAYERS=24
-HIDDEN=2048
+LAYERS=32
+HIDDEN=6144
 HEADS=32
 VOCAB_K=768  # 512 1024
 
@@ -23,9 +23,17 @@ set -ex
 PREMISE=piper
 # PREMISE=mshape
 
-# export DISABLE_INTER_RVD=1
-# export ASYNC_COMM=1
-# export PARAM_LIMIT=12
+if [ $PREMISE == "mshape" ]; then
+    echo "enabling async communication"
+    export DISABLE_INTER_RVD=1
+    export ASYNC_COMM=1
+fi
+
+if [ $PREMISE == "piper" ]; then
+    echo "setting param limit"
+    export PARAM_LIMIT=20
+fi
+
 # export MEM_LIMIT=16
 
 
@@ -40,8 +48,8 @@ TOTAL_GPUS=`expr ${NGPUS} \* ${NNODES}`
 TIME=`date "+%m-%d-%H-%M"`
 
 
-torchrun \
-    --nproc_per_node=$NGPUS --nnodes=$NNODES --node_rank=$NODE_RANK \
+torchrun --nproc_per_node=$NGPUS \
+    --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
         --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 2048 --vocab $VOCAB \
