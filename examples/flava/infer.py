@@ -1,6 +1,6 @@
 """
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun --nproc_per_node=1 \
-    examples/flava/infer.py
+    examples/flava/infer.py --fp16 --layers 12 --hidden 768 --heads 12
 """
 
 from examples.flava.model import FLAVAModel, Config, ImageTextDataLoader
@@ -18,11 +18,9 @@ parser.add_argument('--fp16', action='store_true', default=False)
 parser.add_argument('--mbs', type=int, default=1, help='micro-batch size')
 parser.add_argument('--gbs', type=int, default=8, help='global batch size')
 
-# parser.add_argument('--layers', type=int, required=True)
-# parser.add_argument('--hidden', type=int, required=True)
-# parser.add_argument('--heads', type=int, required=True)
-# parser.add_argument('--seqlen', type=int, required=True)
-# parser.add_argument('--vocab', type=int, required=True)
+parser.add_argument('--layers', type=int, required=True)
+parser.add_argument('--hidden', type=int, required=True)
+parser.add_argument('--heads', type=int, required=True)
 
 # policy
 parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'tp'],
@@ -33,7 +31,7 @@ parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
 parser.add_argument('--load-tsched', type=str, default=None,
                     help='load searched tetris schedule from file')
-parser.add_argument('--db-cache', type=str, default='gpt_db.json',
+parser.add_argument('--db-cache', type=str, default='flava_db.json',
                     help='profiled database save file')
 args = parser.parse_args()
 
@@ -49,18 +47,24 @@ def PASDebug(graph, resource):
 
 def inference():
 
+    assert args.hidden % args.heads == 0, 'hidden must be divisible by heads'
+    cfg = Config(
+        hidden_size=args.hidden,
+        num_heads=args.heads,
+        num_layers=args.layers
+    )
     if DeviceGroup().local_rank == 0:
-        cfg = Config()
-        model = FLAVAModel(cfg)
-        # model = flava_model()
-        model = model.cuda()
+        model = FLAVAModel(cfg) # .cuda()
+        model = model.half() if args.fp16 else model
         model = model.eval()
     else:
         model = None
 
     dataloader = ImageTextDataLoader(
         batch_size=args.gbs,
-        dtype=torch.float16 if args.fp16 else torch.float32)
+        dtype=torch.float16 if args.fp16 else torch.float32,
+        cfg=cfg
+    )
 
     @cube.compile(model, dataloader, PAS=PASDebug)
     def serve(model, dataloader):

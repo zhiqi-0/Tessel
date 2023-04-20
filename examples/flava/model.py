@@ -24,28 +24,18 @@ class Config:
     num_heads: int = 12
     num_layers: int = 12
 
-    image_size: int = 224
+    image_size: int = 480 # 512 # 224
     patch_size: int = 16
     num_channels: int = 3
 
     vocab_size: int = 30522
-    seq_len: int = 512
+    seq_len: int = 1024 # 512
 
     dropout: float = 0.2
 
 
 class FLAVAModel(nn.Module):
-    def __init__(
-        self, cfg: Config,
-        # image_encoder: nn.Module,
-        # text_encoder: nn.Module,
-        # mm_encoder: nn.Module,
-        # image_to_mm_projection: nn.Module,
-        # text_to_mm_projection: nn.Module,
-        # text_projection: nn.Module,
-        # image_projection: nn.Module,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, cfg: Config) -> None:
         super().__init__()
         self.image_encoder = flava_image_encoder(
             hidden_size=cfg.hidden_size,
@@ -96,7 +86,7 @@ class FLAVAModel(nn.Module):
         # CudaTimer().start('image')
         image_hidden = self.image_encoder(image)
         image_hidden = self.image_to_mm_projection(image_hidden)
-        # CudaTimer().stop('image')
+        CudaTimer().stop('image')
 
         # N L2 E
         # CudaTimer().start('text')
@@ -114,10 +104,10 @@ class FLAVAModel(nn.Module):
 
 class ImageTextDataLoader(cube.runtime.syndata.CubeDataLoader):
 
-    def __init__(self, batch_size: int, dtype: torch.dtype, resolution: int = 224, seqlen: int = 512):
+    def __init__(self, batch_size: int, dtype: torch.dtype, cfg: Config):
         super().__init__(batch_size, [0, 0])
-        self.img_size = resolution
-        self.seqlen = seqlen
+        self.img_size = cfg.image_size
+        self.seqlen = cfg.seq_len
         self.dtype = dtype
         self.sample = self.random_sample()
     
