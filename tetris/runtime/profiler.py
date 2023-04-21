@@ -24,7 +24,7 @@ _eval_module_ref: torch.nn.Module = torch.nn.Module().eval()
 class CompProfiler:
 
     @staticmethod
-    def profile(node: IRCell,
+    def profile(node: IRCell, train: bool = True,
                 warmup_sec: float = 2, prof_times: int = 50) -> Tuple[float, float, int, Tuple[int]]:
         """
         Profile a function
@@ -88,11 +88,12 @@ class CompProfiler:
             return x
         def unpack_hook(x): return x
 
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-            run_step(func, args, kwargs, backward=True)
-        torch.cuda.synchronize()
+        if train:
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+                run_step(func, args, kwargs, backward=True)
+            torch.cuda.synchronize()
 
         # for ptr in used_tensor:
         #     torch.cuda.caching_allocator_delete(ptr)
@@ -105,7 +106,7 @@ class CompProfiler:
         torch.cuda.empty_cache()
         tic = time.time()
         while time.time() - tic < warmup_sec:
-            run_step(func, args, kwargs, backward=True)
+            run_step(func, args, kwargs, backward=train)
             torch.cuda.synchronize()
 
         def profile(backward: bool):
@@ -118,7 +119,9 @@ class CompProfiler:
             return (toc - tic) / prof_times * 1000  # in milliseconds
 
         infer_span = profile(backward=False)
-        train_span = profile(backward=True)
+        train_span = 0.0
+        if train:
+            train_span = profile(backward=True)
         
         return infer_span, infer_memory, train_span, train_memory
 
@@ -191,7 +194,7 @@ class ProfileDataBase:
         if filename is not None:
             self.load(filename)
 
-    def profile(self, node: IRFwOperation, device: Optional[int] = None):
+    def profile(self, node: IRFwOperation, train: bool = True, device: Optional[int] = None):
         """
         Profile a forward node in IRGraph on a specific device (default current device)
         
@@ -215,7 +218,7 @@ class ProfileDataBase:
 
         #FIXME: OOM will increase cuda allocated memory
         try:
-            infer_span, infer_memory, train_span, train_memory = CompProfiler.profile(node)
+            infer_span, infer_memory, train_span, train_memory = CompProfiler.profile(node, train)
             # log to database
             self.insert(node, infer_span, infer_memory, train_span, train_memory)
         except Exception as e:

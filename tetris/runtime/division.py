@@ -17,9 +17,6 @@ from tetris.runtime.layer_op import IRLayerOp, cluster_to_layer_ops
 from tetris.runtime.flags import SearchFlag
 
 
-PARAM_LIMIT = os.environ.get('PARAM_LIMIT', None)  # in GB
-
-
 def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
         recompute: bool, estimator: Callable, mem_limit: int) -> Optional[float]:
     """
@@ -45,7 +42,7 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
     total_act_memory = 0
     total_latency = 0
     for layer_op in nodes:
-        latency, act_memory = estimator(layer_op.nodes, train=True)
+        latency, act_memory = estimator(layer_op.nodes)
         # activation memory
         act_memory = act_memory / (t * d) * tp_mem_efficiency
         # recompute granularity: per stage
@@ -75,9 +72,15 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
     param_size = param_size * 4 / t
     total_memory = param_size + total_act_memory
     # only apply to stage with layer 0 if param limit is set
-    if SearchFlag.param_limit is not None and nodes[0].layer_id == 0:
-        if param_size >= SearchFlag.param_limit * 1024 * 1024 * 1024:
-            return None, total_memory
+    if nodes[0].layer_id == 0:
+        # if t <= 1: return None, total_memory
+        # if len(nodes) > 3 or t <= 1: return None, total_memory
+        if SearchFlag.param_limit is not None:
+            if param_size >= SearchFlag.param_limit * 1024 * 1024 * 1024:
+                return None, total_memory
+        if SearchFlag.act_limit is not None:
+            if total_act_memory >= SearchFlag.act_limit * 1024 * 1024 * 1024:
+                return None, total_memory
     return total_latency if total_memory < mem_limit else None, total_memory
 
 
@@ -212,7 +215,7 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     nodes = tuple(nodes)
     print(f'> search [search]: constructing dp tables ({len(nodes)} layer ops)...')
     tic = time.time()
-    max_d = mbs if max_d is None else mbs
+    max_d = mbs if max_d is None else max_d
     max_d = min(max_d, mbs, ndevs)
     max_t = ndevs if max_t is None else max_t
     max_t = min(max_t, ndevs)
