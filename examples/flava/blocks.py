@@ -164,6 +164,7 @@ class TransformerEncoder(torch.nn.Module):
     def forward(self, x: torch.Tensor):
         # x: N L E
         for layer in self.layers:
+            cube.runtime.function.anchor('encoder starts')
             x = layer(x)
         return x
 

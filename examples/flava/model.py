@@ -84,18 +84,21 @@ class FLAVAModel(nn.Module):
         """
         # N L1 E
         # CudaTimer().start('image')
+        cube.runtime.function.anchor('image')
         image_hidden = self.image_encoder(image)
         image_hidden = self.image_to_mm_projection(image_hidden)
-        CudaTimer().stop('image')
+        # CudaTimer().stop('image')
 
         # N L2 E
         # CudaTimer().start('text')
+        cube.runtime.function.anchor('text')
         text_hidden = self.text_encoder(text)
         text_hidden = self.text_to_mm_projection(text_hidden)
         # CudaTimer().stop('text')
 
         # N (L1+L2) E
         # CudaTimer().start('mm')
+        cube.runtime.function.anchor('mm')
         fused_state = torch.cat([image_hidden, text_hidden], dim=1)
         multimodal_logits = self.mm_encoder(fused_state)
         # CudaTimer().stop('mm')
