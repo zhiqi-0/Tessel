@@ -7,12 +7,14 @@ The implementation is a little bit adapted to fit with cube's view
 """
 from typing import List, Callable, Tuple, Dict, Optional
 import time
+import os
 
 from cube.ir.cten import IRTensor
 from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
 
 from tetris.runtime.layer_op import IRLayerOp, cluster_to_layer_ops
+from tetris.runtime.flags import SearchFlag
 
 
 def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
@@ -40,16 +42,16 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
     total_act_memory = 0
     total_latency = 0
     for layer_op in nodes:
-        latency, act_memory = estimator(layer_op.nodes, train=True)
+        latency, act_memory = estimator(layer_op.nodes)
         # activation memory
         act_memory = act_memory / (t * d) * tp_mem_efficiency
         # recompute granularity: per stage
-        inflight = 1 if recompute else inflight
-        total_act_memory += act_memory * inflight
+        # inflight = 1 if recompute else inflight
+        # total_act_memory += act_memory * inflight
 
         # recompute granularity: per layer
-        # total_act_memory = max(total_act_memory, act_memory) if recompute \
-        #     else total_act_memory + act_memory * inflight
+        total_act_memory = max(total_act_memory, act_memory) if recompute \
+            else total_act_memory + act_memory * inflight
 
         # latency
         if recompute:
@@ -64,11 +66,21 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
             for tensor in node.inputs():
                 if isinstance(tensor, IRTensor) and tensor.is_attr():
                     # too large weight will bring memory fragment
-                    factor = 1 if tensor.byte_size() // t <= 1.5 * 1024 * 1024 * 1024 else 1.5
+                    factor = 1 # if tensor.byte_size() // t <= 1.5 * 1024 * 1024 * 1024 else 1.5
                     param_size += tensor.byte_size() * factor
     # consider gradient and adam optimizer (totally 3x param size)
     param_size = param_size * 4 / t
     total_memory = param_size + total_act_memory
+    # only apply to stage with layer 0 if param limit is set
+    if nodes[0].layer_id == 0:
+        # if t <= 1: return None, total_memory
+        # if len(nodes) > 3 or t <= 1: return None, total_memory
+        if SearchFlag.param_limit is not None:
+            if param_size >= SearchFlag.param_limit * 1024 * 1024 * 1024:
+                return None, total_memory
+        if SearchFlag.act_limit is not None:
+            if total_act_memory >= SearchFlag.act_limit * 1024 * 1024 * 1024:
+                return None, total_memory
     return total_latency if total_memory < mem_limit else None, total_memory
 
 
@@ -203,7 +215,7 @@ def layer_division(nodes: Tuple[IRFwOperation], ndevs: int, tps: Callable, mbs: 
     nodes = tuple(nodes)
     print(f'> search [search]: constructing dp tables ({len(nodes)} layer ops)...')
     tic = time.time()
-    max_d = mbs if max_d is None else mbs
+    max_d = mbs if max_d is None else max_d
     max_d = min(max_d, mbs, ndevs)
     max_t = ndevs if max_t is None else max_t
     max_t = min(max_t, ndevs)

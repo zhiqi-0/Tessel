@@ -7,11 +7,10 @@ from cube.graph.function.anchor import IRGraphAnchor
 
 class IRLayerOp(IRCell):
 
-    def __init__(self, nodes: List[IRCell]):
+    def __init__(self, nodes: List[IRCell], layer_id: int = None):
         super().__init__('layer_op', 'layer_op', 0, 0, init_outputs=False)
         self.nodes = nodes
-        self.latency: Dict[int, Optional[float]] = {}
-        self.memory: Dict[int, Optional[float]] = {}
+        self.layer_id : int = layer_id
 
         self.param_size: int = 0  # in bytes
         for node in nodes:
@@ -26,10 +25,10 @@ def cluster_to_layer_ops(nodes: List[IRFwOperation]) -> List[IRLayerOp]:
     for node in nodes:
         if isinstance(node, IRGraphAnchor):
             if len(ops) != 0:
-                layer_ops.append(IRLayerOp(ops))
+                layer_ops.append(IRLayerOp(ops, layer_id=len(layer_ops)))
             ops = [node]
         elif isinstance(node, IRFwOperation):
             ops.append(node)
     if len(ops) != 0:
-        layer_ops.append(IRLayerOp(ops))
+        layer_ops.append(IRLayerOp(ops, layer_id=len(layer_ops)))
     return layer_ops

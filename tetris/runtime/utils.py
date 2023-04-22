@@ -1,11 +1,9 @@
 """
 Premise utils
 """
-from typing import List, Tuple, Optional
-import numpy as np
+from typing import List, Tuple
 import torch
 
-import cube
 from cube.graph.graph import IRGraph
 from cube.graph.function import IRGraphAnchor
 from cube.ir.operator import IRFwOperation
@@ -37,7 +35,7 @@ def annotate_structure(graph: IRGraph) -> List[Tuple[IRFwOperation]]:
     anchors = graph.select(ntype=IRGraphAnchor)
     for idx, anchor in enumerate(anchors):
         nidx = graph.index(anchor)
-        graph.node(nidx + 1).comment = f'===> split position {idx}'
+        graph.node(nidx + 1).comment = f'===> split position {idx}: {anchor.name}'
     fnodes = graph.select(ntype=IRFwOperation)
     subgraphs = more_itertools.split_before(fnodes, lambda n: isinstance(n, IRGraphAnchor))
     return list(subgraphs)

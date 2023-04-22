@@ -10,10 +10,6 @@ import torch
 import math
 from functools import partial
 
-fraction = 16 * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
-print(f'setting memory fraction: {fraction}')
-torch.cuda.set_per_process_memory_fraction(fraction)
-
 from examples.swin.blocks.attention import init_relative_position_index
 from examples.swin.model import Config, SwinTransformer, ImageDataLoader
 
@@ -34,6 +30,7 @@ from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
 from tetris.runtime.piper import Piper
+from tetris.runtime.flags import SearchFlag
 
 import argparse
 
@@ -44,37 +41,37 @@ parser.add_argument('--mbs', type=int, default=1,
                     help='micro-batch size, premise total batch size')
 parser.add_argument('--gbs', type=int, default=256,
                     help='global batch size')
+# model arch
+parser.add_argument('--layers', type=int, required=True, help="the third stage layer number")
+parser.add_argument('--hidden', type=int, required=True, help="the first stage embedding dimension")
+parser.add_argument('--heads', type=int, required=True, help="the first stage number of head")
 # input size: (640, 40) or 1536, 48
-parser.add_argument('--resolution', type=int, default=640,
-                    help='image resolution')
-parser.add_argument('--window-size', type=int, default=40,
-                    help='window size')
-parser.add_argument('--dp', type=int, default=1, 
-                    help='data parallel size')
+parser.add_argument('--resolution', type=int, default=1536, help='image resolution')
+parser.add_argument('--window-size', type=int, default=48, help='window size')
+
+# policy
+parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'tp'],
+                    help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False,
                     help='enable recompute for each layer')
-parser.add_argument('--stage-balance', action='store_true', default=False,
-                    help='profile each layer and try to get a balanced pipeline stage within memory constraints')
-# model arch
-parser.add_argument('--layers', type=int, required=True,
-                    help="the third stage layer number")
-parser.add_argument('--hidden', type=int, required=True,
-                    help="the first stage embedding dimension")
-parser.add_argument('--heads', type=int, required=True,
-                    help="the first stage number of head")
-# policy
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper'],
-                    help='premise shape')
+
 # log save
-parser.add_argument('--save', type=str, default=None,
+parser.add_argument('--save', type=str, default=None, 
                     help='folder for save searched results.')
+parser.add_argument('--load-tsched', type=str, default=None,
+                    help='load searched tetris schedule from file')
 parser.add_argument('--db-cache', type=str, default='db.json',
                     help='profiled database save file')
 args = parser.parse_args()
 
 cube.init()
 print_each_rank(str(args), rank_only=0)
+print_each_rank(str(SearchFlag()), rank_only=0)
 
+if SearchFlag.mem_limit is not None:
+    fraction = SearchFlag.mem_limit * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
+    print_each_rank(f'> setting memory fraction: {fraction}')
+    torch.cuda.set_per_process_memory_fraction(fraction)
 
 # ========================= parallelisms =================================
 
@@ -85,66 +82,16 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
         if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
         if fnode.name == 'window_attn' or fnode.name == 'feedforward':
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
-        elif fnode.name == 'linear':  # the last embedding linear
-            tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         else:
             replica(graph, fnode, devs)
     return segment
 
 # ========================= parallelisms =================================
 
-def PASProfile(graph: IRGraph, resource):
-    """Profile performance"""
-    devs = list(range(resource.ngpus))
-    graph = stage_tp(graph, graph, devs)
-    for dl in graph.select(ntype=IRDataOperation):
-        replica(graph, dl, devs)
-    return graph
-
-
-def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
-    """1F1B schedule"""
-    transformers = annotate_structure(graph)
-
-    global stage_comp_cost
-    FW, BW = 'forward', 'backward'
-
-    if args.recompute:
-        for transformer in transformers:
-            graph.recompute(transformer)
-
-    pp_size = ndevs
-
-    fnodes = graph.select(ntype=IRFwOperation)
-    estimator = Estimator(args.db_cache)
-    tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
-    min_cost, best_config = layer_division(fnodes, ndevs, tps, args.mbs, max_d=1, max_t=1)
-
-    fstages = [stage_nodes for stage_nodes, _, _ in best_config]
-    graph.staging(tuple(stages[0] for stages in fstages))
-    
-    segments = graph.select(ntype=IRSegment, flatten=False)
-    fsegments = [seg for seg in segments if seg.isfw()]
-    for devid, segment in enumerate(fsegments):
-        graph.assign(segment, devid)
-
-    sched = TSched(pp_size)
-    fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(pp_size)]
-    fdevs = [[devid] for devid in range(pp_size)]
-    bblocks = [TBlock(0, span=2, memory=-1, btype=BW) for _ in range(pp_size)]
-    bdevs = [[devid] for devid in range(pp_size)][::-1]
-    blocks = fblocks + bblocks
-    devs = fdevs + bdevs
-    sched.add_block_seq(blocks, devs)
-
-    # print(graph.extra_repr())
-    return sched
-
 
 def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """MShape schedule"""
     transformers = annotate_structure(graph)
-    FW, BW = 'forward', 'backward'
     if args.recompute:
         for transformer in transformers:
             graph.recompute(transformer)
@@ -159,7 +106,8 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
 
     estimator = Estimator(args.db_cache)
     tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
-    min_cost, best_config = layer_division(sub_tps, ndevs, tps, args.mbs, max_d=1, max_t=1)
+    min_cost, best_config = layer_division(
+        sub_tps, ndevs, tps, args.mbs, max_d=1, max_p=4)
 
     fstages = [full_tps] + [stage_nodes for stage_nodes, _, _ in best_config]
     graph.staging(tuple(stages[0] for stages in fstages))
@@ -170,16 +118,25 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     tp_devs = list(range(ndevs))
     stage_tp(graph, fsegments[0], tp_devs)
 
-    for devid, segment in enumerate(fsegments[1:]):
-        graph.assign(segment, devid)
+    curr_devs = 0
+    for segment, (_, dp, tp) in zip(fsegments[1:], best_config):
+        stage_ndevs = dp * tp
+        if stage_ndevs > 1:
+            stage_tp(graph, segment, 
+                     list(range(curr_devs, curr_devs + stage_ndevs)))
+        else:
+            graph.assign(segment, curr_devs)
+        curr_devs += stage_ndevs
 
+    FW, BW = 'forward', 'backward'
+    ndevs = len(fsegments) - 1
     sched = TSched(ndevs)
     # 
     fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
     fdevs = [[devid] for devid in range(ndevs)]
-    bblocks = [TBlock(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+    bblocks = [TBlock(0, span=3 if args.recompute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
-    #
+    # fully shard
     fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))
     fdevs.insert(0, list(range(ndevs)))
     bblocks.insert(len(bblocks), TBlock(0, span=2, memory=-1, btype=BW))
@@ -189,6 +146,20 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     devs = fdevs + bdevs
     sched.add_block_seq(blocks, devs)
     return sched
+
+
+def full_tp(graph: IRGraph, resource):
+
+    transformers = annotate_structure(graph)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
+
+    devs = list(range(resource.ngpus))
+    stage_tp(graph, graph, devs)
+    for dl in graph.select(ntype=IRDataOperation):
+        replica(graph, dl, devs)
+    return graph
 
 
 def train():
@@ -222,15 +193,21 @@ def train():
     if args.premise == 'piper':
         runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
                                  recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
-    else:
+    elif args.premise == 'tp':
+        runtime_policy = full_tp
+    elif args.premise == 'mshape':
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
-                                 premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
-                                 max_inflight_blks = [8] * DeviceGroup().world_size,
+                                 premise=premise_mshape if args.premise == 'vshape' else premise_mshape,
+                                 max_inflight_blks = [10] * DeviceGroup().world_size,
+                                 load_plan=args.load_tsched,
                                  save_dir=args.save)
+    else:
+        raise RuntimeError(f"not Supported for {args.premise}")
 
     model = cube.SemanticModel(model)
-    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=load_content)
+    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, 
+                  load_content=load_content, comm_cost_fn=lambda x: 1)
     def train_iter(model, dataloader):
         imgs = next(dataloader)
         loss = model(imgs)
@@ -275,18 +252,6 @@ def train():
     print_each_rank('e2e time (ms) per iteration: {} ms'.format(
         CudaTimer().duration(iter_num-warmup, field_name='e2e')))
     CudaTimer().print_all(times=iter_num-warmup)
-
-    if torch.distributed.get_rank() == 0 and args.premise == 'profile':
-        memory = []
-        latency = []
-        for idx in range(sum(cfg.depths)):
-            name = f'blk{idx}'
-            span = CudaTimer().duration(iter_num-warmup, name)
-            mem = MemoryProfiler().get(f'blk{idx}')
-            latency.append(span)
-            memory.append(mem)
-            print(f'blk{idx} memory: {round(mem / 1024 / 1024, 2)} MB | latency: {round(span, 2)} ms')
-        print(f'sumed activation: {sum(memory) / 1024 / 1024 / 1024} GB')
     memory_summary()
 
 

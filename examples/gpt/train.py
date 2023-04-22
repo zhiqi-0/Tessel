@@ -30,9 +30,9 @@ from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
 from tetris.runtime.piper import Piper
+from tetris.runtime.flags import SearchFlag
 
 import argparse
-import os
 
 parser = argparse.ArgumentParser(description='SwinTransformer Train')
 parser.add_argument('--fp16', action='store_true', default=False)
@@ -51,17 +51,18 @@ parser.add_argument('--recompute', action='store_true', default=False)
 # log save
 parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
+parser.add_argument('--load-tsched', type=str, default=None,
+                    help='load searched tetris schedule from file')
 parser.add_argument('--db-cache', type=str, default='gpt_db.json',
                     help='profiled database save file')
 args = parser.parse_args()
 
 cube.init()
 print_each_rank(str(args), rank_only=0)
+print_each_rank(str(SearchFlag()), rank_only=0)
 
-
-MEM_LIMIT = os.environ.get('MEM_LIMIT', None)
-if MEM_LIMIT is not None:
-    fraction = int(MEM_LIMIT) * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
+if SearchFlag.mem_limit is not None:
+    fraction = SearchFlag.mem_limit * 1024 * 1024 * 1024 / torch.cuda.get_device_properties(0).total_memory
     print_each_rank(f'> setting memory fraction: {fraction}')
     torch.cuda.set_per_process_memory_fraction(fraction)
 
@@ -94,6 +95,12 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
 
 
 def full_tp(graph: IRGraph, resource):
+
+    transformers = annotate_structure(graph)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
+
     devs = list(range(resource.ngpus))
     stage_tp(graph, graph, devs)
     for dl in graph.select(ntype=IRDataOperation):
@@ -105,14 +112,11 @@ def full_tp(graph: IRGraph, resource):
 def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """1F1B schedule"""
     transformers = annotate_structure(graph)
-
-    global stage_comp_cost
     FW, BW = 'forward', 'backward'
 
-    ScheduleCodeGen.recompute = True
-    # if args.recompute:
-    #     for transformer in transformers:
-    #         graph.recompute(transformer)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
 
     pp_size = ndevs
 
@@ -145,12 +149,9 @@ def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
 def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """MShape schedule"""
     transformers = annotate_structure(graph)
-    FW, BW = 'forward', 'backward'
-
-    ScheduleCodeGen.recompute = True
-    # if args.recompute:
-    #     for transformer in transformers:
-    #         graph.recompute(transformer)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
     
     nlayers_to_tp = 1
     full_tps, sub_tps = [], []
@@ -184,17 +185,18 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
             graph.assign(segment, curr_devs)
         curr_devs += stage_ndevs
 
+    FW, BW = 'forward', 'backward'
     ndevs = len(fsegments) - 1
     sched = TSched(ndevs)
     # 
     fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
     fdevs = [[devid] for devid in range(ndevs)]
-    bblocks = [TBlock(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+    bblocks = [TBlock(0, span=3 if args.recompute else 2, memory=-1, btype=BW) for _ in range(ndevs)]
     bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
     #
-    fblocks.insert(0, TBlock(0, span=1, memory=1, btype=FW))
+    fblocks.insert(0, TBlock(0, span=1, memory=0, btype=FW))
     fdevs.insert(0, list(range(ndevs)))
-    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=-1, btype=BW))
+    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=0, btype=BW))
     bdevs.insert(len(bblocks), list(range(ndevs)))
 
     blocks = fblocks + bblocks
@@ -229,11 +231,13 @@ def train():
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
                                  premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
-                                 max_inflight_blks = [8] * DeviceGroup().world_size,
+                                 max_inflight_blks = [10] * DeviceGroup().world_size,
+                                 load_plan=args.load_tsched,
                                  save_dir=args.save)
 
     model = cube.SemanticModel(model)
-    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False)
+    @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 
+                  comm_cost_fn=lambda x: 1)
     def train_iter(model, dataloader):
         datas = next(dataloader)
         loss = model(*datas)

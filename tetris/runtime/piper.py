@@ -18,10 +18,7 @@ from cube.codegen.schedule.schedule import ScheduleCodeGen
 from tetris.runtime.estimator import Estimator
 from tetris.runtime.utils import replica, annotate_structure
 from tetris.runtime.division import TPS, layer_division
-
-import os
-MEM_LIMIT=os.environ.get('MEM_LIMIT', None)
-
+from tetris.runtime.flags import SearchFlag
 
 
 def Piper(graph: IRGraph, resource, nmicros: int,
@@ -38,13 +35,16 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     @return graph IRGraph
     """
-    annotate_structure(graph)
+    transformers = annotate_structure(graph)
+    if recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
     nodes = tuple(graph.select(ntype=IRFwOperation))
 
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    mem_limit = int(MEM_LIMIT) * 1024 * 1024 * 1024 if MEM_LIMIT is not None else resource.gpus[0].memory
+    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
     estimator = Estimator(db_cache)
@@ -66,10 +66,6 @@ def Piper(graph: IRGraph, resource, nmicros: int,
 
     segments = graph.select(ntype=IRSegment, flatten=False)
     fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
-    ScheduleCodeGen.recompute = recompute
-    # if recompute:
-    #     for fseg in fsegments:
-    #         graph.recompute(fseg.nodes())
     assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
     devices = list(range(resource.ngpus))
