@@ -96,7 +96,7 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
         for transformer in transformers:
             graph.recompute(transformer)
     
-    nlayers_to_tp = 4
+    nlayers_to_tp = 5
     full_tps, sub_tps = [], []
     for idx, layer_nodes in enumerate(transformers):
         if idx < nlayers_to_tp:
@@ -107,7 +107,7 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     estimator = Estimator(args.db_cache)
     tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
     min_cost, best_config = layer_division(
-        sub_tps, ndevs, tps, args.mbs, max_d=1, max_p=4)
+        sub_tps, ndevs, tps, args.mbs, max_d=1, max_p=4, max_t=1)
 
     fstages = [full_tps] + [stage_nodes for stage_nodes, _, _ in best_config]
     graph.staging(tuple(stages[0] for stages in fstages))
@@ -253,6 +253,8 @@ def train():
         CudaTimer().duration(iter_num-warmup, field_name='e2e')))
     CudaTimer().print_all(times=iter_num-warmup)
     memory_summary()
+    if DeviceGroup().local_rank == 0:
+        print(torch.cuda.memory_summary())
 
 
 if __name__ == '__main__':

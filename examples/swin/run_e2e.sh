@@ -9,15 +9,15 @@ mkdir -p $LOGS
 GPU=V100
 
 # model arch
-LAYERS=32
-HIDDEN=512
-HEADS=16
+LAYERS=26
+HIDDEN=384
+HEADS=12
 
 set -ex
 
 # PREMISE=tp
-# PREMISE=piper
-PREMISE=mshape
+PREMISE=piper
+# PREMISE=mshape
 
 if [ $PREMISE == "mshape" ]; then
     echo "enabling async communication"
@@ -26,12 +26,12 @@ if [ $PREMISE == "mshape" ]; then
 fi
 
 if [ $PREMISE == "piper" ]; then
-    echo "setting activation limit"
-    export ACT_LIMIT=24
+    echo "setting param limit"
+    # export ACT_LIMIT=14
 fi
 
 # export MEM_LIMIT=16
-
+# export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:1024
 
 # training config
 NGPUS=4
@@ -49,7 +49,7 @@ WINDOW_SIZE=48
 torchrun --nproc_per_node=$NGPUS --nnodes=$NNODES \
     --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
     examples/swin/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
+        --fp16 --mbs 1 --gbs 16 --premise $PREMISE --recompute \
         --resolution $RESOLUTION --window-size $WINDOW_SIZE \
         --layers $LAYERS --hidden $HIDDEN --heads $HEADS \
         --db-cache swin_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
