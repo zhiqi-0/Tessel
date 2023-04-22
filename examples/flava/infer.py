@@ -40,7 +40,7 @@ parser.add_argument('--hidden', type=int, required=True)
 parser.add_argument('--heads', type=int, required=True)
 
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'yshape'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'yshape', 'tp'],
                     help='premise shape')
 # log save
 parser.add_argument('--save', type=str, default=None,
@@ -69,6 +69,14 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]):
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         else:
             replica(graph, fnode, devs)
+
+
+def PASTP(graph: IRGraph, resource):
+    devices = list(range(resource.ngpus))
+    dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
+    replica(graph, dl, devices)
+    stage_tp(graph, graph, devices)
+    return graph
 
 
 def PAS1F1B(graph: IRGraph, resource):
@@ -218,6 +226,8 @@ def inference():
         runtime_policy = PAS1F1B
     elif args.premise == 'yshape':
         runtime_policy = PASYShape
+    elif args.premise == 'tp':
+        runtime_policy = PASTP
 
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy)
