@@ -1,6 +1,6 @@
 """
 PYTHONPATH=.:$PYTHONPATH python examples/cases.py \
-    --premise vshape --ndevs 4 --nmicros 4 --memory 4
+    --premise vshape --ndevs 4 --nmicros 4 --inflight 4
 """
 from typing import List
 import sys
@@ -9,6 +9,7 @@ import argparse
 
 from tetris.schedplan import SchedPlan, Block
 from tetris.solver import StepOptimalSolver
+from tetris.composer import Composer
 
 
 FW='forward'
@@ -18,102 +19,115 @@ BW='backward'
 class Premise:
 
     @staticmethod
-    def vshape(ndevs: int, nmicros: int) -> List[SchedPlan]:
+    def vshape(ndevs: int) -> SchedPlan:
         """
         f             b
           f         b  
             f     b    
               f b      
         """
-        scheds = []
-        for mid in range(nmicros):
-            sched = SchedPlan(ndevs)
-            fblocks = [Block(mid, span=1, memory=1, btype=FW) for _ in range(ndevs)]
-            fdevs = [[devid] for devid in range(ndevs)]
-            bblocks = [Block(mid, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
-            bdevs = [[devid] for devid in range(ndevs)][::-1]
-            blocks = fblocks + bblocks
-            devs = fdevs + bdevs
-            sched.add_block_seq(blocks, devs)
-            scheds.append(sched)
-        return scheds
-
-    @staticmethod
-    def chimera(ndevs: int, nmicros: int) -> SchedPlan:
-        """
-        f             b        f b
-          f         b        f     b
-            f     b        f         b
-              f b        f             b
-        """
         sched = SchedPlan(ndevs)
-        assert nmicros % 2 == 0, "require microbatch# can be devided by 2"
-        for mid in range(nmicros // 2): # V shape
-            blocks = [None] * ndevs * 2
-            devs = [None] * ndevs * 2
-            for devid in range(ndevs):
-                blocks[devid] = Block(mid, Block.BType.FW, span=1)
-                devs[devid] = [devid]
-                blocks[-1-devid] = Block(mid, Block.BType.BW, span=2)
-                devs[-1-devid] = [devid]
-            sched.add_block_seq(blocks, devs)
-            sched.add_dependency(blocks)
-        for mid in range(nmicros // 2, nmicros): # ^ shape
-            blocks = [None] * ndevs * 2
-            devs = [None] * ndevs * 2
-            for devid in range(ndevs):
-                blocks[devid] = Block(mid, Block.BType.FW, span=1)
-                devs[devid] = [ndevs-1-devid]
-                blocks[-1-devid] = Block(mid, Block.BType.BW, span=2)
-                devs[-1-devid] = [ndevs-1-devid]
-            sched.add_block_seq(blocks, devs)
-            sched.add_dependency(blocks)
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)][::-1]
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
         return sched
 
     @staticmethod
-    def interleave(ndevs: int, nmicros: int) -> SchedPlan:
+    def xshape(ndevs: int) -> SchedPlan:
         """
-        f f   f         b   b b
-        f   f f         b b   b
-        f     f f     b b     b
-        f     f   f b   b     b
+        f     f b     b
+          f f     b b  
+          f f     b b  
+        f     f b     b
         """
         sched = SchedPlan(ndevs)
-        for mid in range(nmicros):
-            fblocks = []
-            bblocks = []
-            fblocks = [Block(mid, Block.BType.FW, span=1) for _ in range(ndevs)]
-            fdevs = [[devid] for devid in range(ndevs)]
-            bblocks = [Block(mid, Block.BType.BW, span=2) for _ in range(ndevs)]
-            bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
-            #
-            fblocks.insert(ndevs // 2, Block(mid, Block.BType.FW, span=1))
-            fdevs.insert(ndevs // 2, list(range(ndevs)))
-            bblocks.insert(ndevs // 2, Block(mid, Block.BType.BW, span=2))
-            bdevs.insert(ndevs // 2, list(range(ndevs)))
-            # 
-            fblocks.insert(0, Block(mid, Block.BType.FW, span=1))
-            fdevs.insert(0, list(range(ndevs)))
-            bblocks.insert(len(bblocks), Block(mid, Block.BType.BW, span=2))
-            bdevs.insert(len(bblocks), list(range(ndevs)))
+        # v
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)][::-1]
+        vblocks = fblocks + bblocks
+        vdevs = fdevs + bdevs
+        # ^
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)][::-1]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[devid] for devid in range(ndevs)]
+        rvblocks = fblocks + bblocks
+        rvdevs = fdevs + bdevs
 
-            blocks = fblocks + bblocks
-            devs = fdevs + bdevs
-            sched.add_block_seq(blocks, devs)
-            sched.add_dependency(blocks)
+        sched.add_block_seq(vblocks, vdevs)
+        sched.add_block_seq(rvblocks, rvdevs)
+        return sched
+
+    @staticmethod
+    def mshape(ndevs: int) -> SchedPlan:
+        """
+        f f             b b
+        f   f         b   b
+        f     f     b     b
+        f       f b       b
+        """
+        sched = SchedPlan(ndevs)
+        # 
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+        bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        #
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
+        bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
+        bdevs.insert(len(bblocks), list(range(ndevs)))
+    
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
+
+    @staticmethod
+    def yshape(ndevs: int) -> SchedPlan:
+        """
+        f   f
+          f f
+        f   f
+          f f 
+        """
+        sched = SchedPlan(ndevs)
+        # full spmd on loss:
+        mm = [Block(0, span=1, memory=0, btype=FW)]
+        mm_devs = [list(range(ndevs))]
+        # vshape
+        ndevs1 = ndevs // 2
+        fbranch1 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs1)]
+        fdevs = [[devid] for devid in range(ndevs1)]
+        branch1 = fbranch1 + mm
+        branch1_devs = fdevs + mm_devs
+        # vshape
+        ndevs2 = ndevs - ndevs1
+        fbranch2 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs1)]
+        fdevs = [[devid] for devid in range(ndevs1, ndevs1+ndevs2)]
+        branch2 = fbranch2 + mm
+        branch2_devs = fdevs + mm_devs
+    
+        sched.add_block_seq(branch1, branch1_devs)
+        sched.add_block_seq(branch2, branch2_devs)
         return sched
     
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='comm primitive')
-    parser.add_argument('--premise', type=str,
-                        choices=['vshape', 'interleave', 'mshape', 'chimera', 'alphafold', 'two_tower', 'custom'])
+    parser.add_argument('--premise', type=str, required=True)
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
                         help='number of micro-batches')
-    parser.add_argument('--memory', type=int,
+    parser.add_argument('--inflight', type=int,
                         help='memory limits')
     args = parser.parse_args()
 
@@ -122,21 +136,30 @@ if __name__ == '__main__':
     sys.stdout.flush()
 
     premise = getattr(Premise, args.premise)
-    micros = premise(args.ndevs, args.nmicros)
-    memory = [args.memory] * args.ndevs
+    micro: SchedPlan = premise(args.ndevs)
+    for gid, blk in enumerate(micro.chain_blocks()):
+        blk.gid = gid
 
-    # step-optimal search
-    solver = StepOptimalSolver(args.ndevs)
-    for micro in micros: 
-        print('adding micro:')
-        print(micro)
-        solver.add_micro_plan(micro)
+    micros = [micro.copy(mid) for mid in range(args.nmicros)]
+    memory = [args.inflight] * args.ndevs
+
+    print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
+    print(micros[0])
+
+    all_blocks = []
+    all_devices = []
+    for micro in micros:
+        for block in micro.all_blocks():
+            all_blocks.append(block)
+            all_devices.append(micro.device(block))
+
     tic = time.time()
-    solver.time_optimal(memory)
-    toc = time.time()
-    print('search time for step optimal span: {:.2f} seconds'.format(toc-tic))
+    sched, nsteps = Composer.construct(
+        all_blocks, all_devices, args.ndevs, memory,
+        optimizer=StepOptimalSolver)
+    span = time.time() - tic
+
+    print(f'search time for optimal step {nsteps} span: {span:.2f} seconds')
 
     print('find one solution:')
-    for schedplan in solver.solutions():
-        print(schedplan)
-        break
+    print(sched)

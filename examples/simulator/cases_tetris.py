@@ -1,34 +1,3 @@
-"""
-mkdir -p figures
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise vshape --ndevs 4 --nmicros 4 --memory 4 --save figures \
-    > figures/vshape-4dev-4micro-4mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise chimera --ndevs 4 --nmicros 3 --memory 4 --save figures \
-    > figures/chimera-4dev-3micro-4mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise mshape --ndevs 4 --nmicros 4 --memory 8 --save figures \
-    > figures/mshape-4dev-3micro-8mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise interlace_s2s --ndevs 4 --nmicros 4 --memory 10 --save figures \
-    > figures/interlace_s2s-4dev-4micro-10mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise interlace_mlm --ndevs 4 --nmicros 4 --memory 10 --save figures \
-    > figures/interlace_mlm-4dev-4micro-10mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise finetune --ndevs 4 --nmicros 4 --memory 10 --save figures \
-    > figures/finetune-4dev-4micro-10mem.log
-
-PYTHONPATH=.:$PYTHONPATH python examples/simulator/cases_tetris.py \
-    --premise two_tower_infer --ndevs 4 --nmicros 2 --memory 4 --save figures \
-    > figures/two_tower_infer-4dev-2micro-4mem.log
-"""
 import sys
 import time
 import argparse
@@ -56,7 +25,7 @@ class Premise:
         sched = SchedPlan(ndevs)
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
         fdevs = [[devid] for devid in range(ndevs)]
-        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[devid] for devid in range(ndevs)][::-1]
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
@@ -64,7 +33,7 @@ class Premise:
         return sched
 
     @staticmethod
-    def chimera(ndevs: int) -> SchedPlan:
+    def xshape(ndevs: int) -> SchedPlan:
         """
         f     f b     b
           f f     b b  
@@ -75,14 +44,14 @@ class Premise:
         # v
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
         fdevs = [[devid] for devid in range(ndevs)]
-        bblocks = [Block(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[devid] for devid in range(ndevs)][::-1]
         vblocks = fblocks + bblocks
         vdevs = fdevs + bdevs
         # ^
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
         fdevs = [[devid] for devid in range(ndevs)][::-1]
-        bblocks = [Block(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[devid] for devid in range(ndevs)]
         rvblocks = fblocks + bblocks
         rvdevs = fdevs + bdevs
@@ -165,10 +134,10 @@ class Premise:
         fdevs = [[devid] for devid in range(ndevs)]
         bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
-        #
-        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        # fully shard
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
-        bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
+        bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
         bdevs.insert(len(bblocks), list(range(ndevs)))
     
         blocks = fblocks + bblocks
@@ -204,8 +173,8 @@ class Premise:
     @staticmethod
     def two_tower(ndevs: int) -> SchedPlan:
         """
-        f   f b-b b-b
-        f   f b-b b-b
+          f f b-b b-b
+          f f b-b b-b
         f   f b-b     b-b
           f f b-b b-b
         """
@@ -238,29 +207,29 @@ class Premise:
         return sched
 
     @staticmethod
-    def two_tower_infer(ndevs: int) -> SchedPlan:
+    def yshape(ndevs: int) -> SchedPlan:
         """
         f   f
           f f
-          f f
-        f   f 
+        f   f
+          f f 
         """
         sched = SchedPlan(ndevs)
         # full spmd on loss:
-        loss = [Block(0, span=1, memory=0, btype=FW)]
-        loss_devs = [list(range(ndevs))]
+        mm = [Block(0, span=1, memory=0, btype=FW)]
+        mm_devs = [list(range(ndevs))]
         # vshape
         ndevs1 = ndevs // 2
         fbranch1 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs1)]
         fdevs = [[devid] for devid in range(ndevs1)]
-        branch1 = fbranch1 + loss
-        branch1_devs = fdevs + loss_devs
-        # ^shape
+        branch1 = fbranch1 + mm
+        branch1_devs = fdevs + mm_devs
+        # vshape
         ndevs2 = ndevs - ndevs1
-        fblocks = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs2)]
-        fdevs = [[devid+ndevs1] for devid in range(ndevs2)][::-1]
-        branch2 = fblocks + loss
-        branch2_devs = fdevs + loss_devs
+        fbranch2 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs1)]
+        fdevs = [[devid] for devid in range(ndevs1, ndevs1+ndevs2)]
+        branch2 = fbranch2 + mm
+        branch2_devs = fdevs + mm_devs
     
         sched.add_block_seq(branch1, branch1_devs)
         sched.add_block_seq(branch2, branch2_devs)
@@ -290,21 +259,6 @@ class Premise:
         sched.add_block_seq(blocks, devs)
         return sched
     
-    @staticmethod
-    def yshape(ndevs: int) -> SchedPlan:
-        """
-        f   f b   b
-          f f b b
-          f f b b
-        f   f b   b
-
-        f f         b b
-            f f b b
-            f f b b
-        f f         b b
-        """
-        pass
-    
 
 if __name__ == '__main__':
 
@@ -314,7 +268,7 @@ if __name__ == '__main__':
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
                         help='number of micro-batches')
-    parser.add_argument('--memory', type=int,
+    parser.add_argument('--inflight', type=int,
                         help='memory limits')
     parser.add_argument('--save', type=str, default=None,
                         help='save searched schedule under a folder')
@@ -329,11 +283,12 @@ if __name__ == '__main__':
     for gid, blk in enumerate(micro.chain_blocks()):
         blk.gid = gid
 
-    micros = [micro.copy(mid) for mid in range(args.nmicros)]
-    memory = [args.memory] * args.ndevs
+    nmicros = min(args.nmicros, args.inflight)
+    print(f'Premise: {args.ndevs} devices, {nmicros} micro-batches')
+    print(micro)
 
-    print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
-    print(micros[0])
+    micros = [micro.copy(mid) for mid in range(nmicros)]
+    memory = [args.inflight] * args.ndevs
 
     tic = time.time()
     schedules = Composer.compose(micros, memory)
@@ -342,9 +297,13 @@ if __name__ == '__main__':
     print('\n================================================')
     print('search time: {:.2f} seconds'.format(toc-tic))
 
+    if len(schedules) == 0:
+        print(f'no solution')
     for idx, schedule in enumerate(schedules):
         print(f'schedule-{idx}:\n{schedule}')
-        print(f'Unrolled schedule:\n{schedule.unroll(args.nmicros + 2)}')
+        print(f'Unrolled schedule:\n{schedule.unroll(nmicros + 2)}')
+
+    # schedule.save('./xshape.tsched.4stages.json')
 
     if args.save is not None:
         now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
@@ -353,6 +312,7 @@ if __name__ == '__main__':
             os.path.join(args.save, f"{args.premise}-premise.{now}.png"))
         repetends = [sched.extract(sched.repetend[0], sched.repetend[1]) for sched in schedules]
         for idx, (schedule, repetend) in enumerate(zip(schedules, repetends)):
+            schedule.save(os.path.join(args.save, f"{args.premise}-schedule-{idx}.{now}.json"))
             Painter.visualize(
                 schedule,
                 os.path.join(args.save, f"{args.premise}-schedule-{idx}.{now}.png"))
