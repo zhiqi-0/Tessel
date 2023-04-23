@@ -1,90 +1,55 @@
+#!/bin/bash
+
+export PYTHONPATH=.:$PYTHONPATH
+export OMP_NUM_THREADS=4
+
+LOGS=logs/gpt
+mkdir -p $LOGS
+
+GPU=V100
+
+# model arch
+LAYERS=36
+HIDDEN=2560
+HEADS=32
+VOCAB_K=768  # 512 1024
+
+VOCAB=`expr ${VOCAB_K} \* 1000`
 
 set -ex
 
-GPU=V100
 PREMISE=piper
+# PREMISE=mshape
 
-#=============== micro-bench test =============#
+if [ $PREMISE == "mshape" ]; then
+    echo "enabling async communication"
+    export DISABLE_INTER_RVD=1
+    export ASYNC_COMM=1
+fi
 
-# 8 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 8 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
+if [ $PREMISE == "piper" ]; then
+    echo "setting param limit"
+    export PARAM_LIMIT=10
+fi
 
-# 9 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 9 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
+NGPUS=4
+NNODES=1
+HOSTNAME=worker-0
+HOSTNAME=GCRSANDBOX109
+NODE_RANK=0
 
-# 10 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 10 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096_heads32.log
+TOTAL_GPUS=`expr ${NGPUS} \* ${NNODES}`
+TIME=`date "+%m-%d-%H-%M"`
 
-# 11 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 11 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
+LAYERS=(24 28 32 36 40 44 48)
 
-# 12 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 12 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
-
-
-# 13 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 13 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
-
-# 14 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 14 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
-
-# 15 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 15 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
-
-
-# 16 layer
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
-    --nproc_per_node=4 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers 16 --hidden 4096 --heads 32 --seqlen 2048 --vocab 512000 \
-        --db-cache gpt_${GPU}_db.json \
-    >> gpt.$PREMISE.hidden4096.heads32.log
+for LAYER in ${LAYERS[@]}; do
+    echo "Running with ${LAYER} layers"
+    torchrun --nproc_per_node=$NGPUS \
+        --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
+        examples/gpt/train.py \
+            --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
+            --layers $LAYER --hidden $HIDDEN --heads $HEADS --seqlen 2048 --vocab $VOCAB \
+            --db-cache gpt_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
+        2>&1 | tee -a ${LOGS}/micro.${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYER}.hidden${HIDDEN}.heads${HEADS}.${TIME}.log
+done
