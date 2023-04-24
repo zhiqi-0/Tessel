@@ -1,5 +1,6 @@
 #!/bin/bash
 
+echo $CUDA_VISIBLE_DEVICES
 export PYTHONPATH=.:$PYTHONPATH
 export OMP_NUM_THREADS=4
 
@@ -9,20 +10,25 @@ mkdir -p $LOGS
 GPU=V100
 
 # model arch
-LAYERS=32
-HIDDEN=4096
-HEADS=32
-VOCAB_K=768  # 512 1024
+LAYERS=48
+HIDDEN=8192
+HEADS=64
+VOCAB_K=1024 # 512 1024
 
+NGPUS=8
+NNODES=2
+HOSTNAME=worker-0
+# HOSTNAME=GCRSANDBOX109
+# NODE_RANK=0
 
 VOCAB=`expr ${VOCAB_K} \* 1000`
 
 set -ex
 
 # PREMISE=tp
-PREMISE=1f1b
-PREMISE=gpipe
-# PREMISE=mshape
+# PREMISE=1f1b
+# PREMISE=gpipe
+PREMISE=mshape
 
 if [ $PREMISE == "mshape" ]; then
     echo "enabling async communication"
@@ -37,13 +43,6 @@ fi
 
 # export MEM_LIMIT=16
 
-
-# training config
-NGPUS=4
-NNODES=1
-HOSTNAME=node-0
-HOSTNAME=GCRSANDBOX109
-NODE_RANK=0
 
 TOTAL_GPUS=`expr ${NGPUS} \* ${NNODES}`
 TIME=`date "+%m-%d-%H-%M"`
