@@ -1,12 +1,5 @@
-"""
-PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun --nproc_per_node=1 --nnodes=1 \
-    examples/gpt/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper \
-        --layers 16 --hidden 2560 --heads 16 --seqlen 2048 --vocab 500000 \
-        --db-cache gpt_V100_db.json
-"""
 
-from typing import List
+from typing import List, Callable
 import torch
 from functools import partial
 
@@ -15,7 +8,7 @@ from examples.gpt.model import Config, GPT, GPTDataLoader
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
-from cube.codegen.schedule.schedule import ScheduleCodeGen
+from cube.graph.schedule.predefined import PredefinedSched
 
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
@@ -29,7 +22,6 @@ from tetris.runtime.sched import tsched
 from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
-from tetris.runtime.piper import Piper
 from tetris.runtime.flags import SearchFlag
 
 import argparse
@@ -45,7 +37,7 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['vshape', 'mshape', 'piper', 'tp'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'mshape', 'gpipe', 'tp'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -109,41 +101,65 @@ def full_tp(graph: IRGraph, resource):
 
 # ========================= parallelisms =================================
 
-def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
-    """1F1B schedule"""
+def PASPredefined(graph: IRGraph, resource, sched: str):
+    """VShape policy"""
     transformers = annotate_structure(graph)
-    FW, BW = 'forward', 'backward'
-
     if args.recompute:
         for transformer in transformers:
             graph.recompute(transformer)
+    nodes = tuple(graph.select(ntype=IRFwOperation))
 
-    pp_size = ndevs
+    dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
+    mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    fnodes = graph.select(ntype=IRFwOperation)
+    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    print(f'> search [constraints]: device limitied memory: {mem_limit}')
+
     estimator = Estimator(args.db_cache)
-    tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
-    min_cost, best_config = layer_division(fnodes, ndevs, tps, args.mbs, max_d=1, max_t=1)
+    tps = partial(TPS, recompute=args.recompute, 
+                  estimator=estimator, mem_limit=mem_limit)
+    print(f'> search [initialize]: profiling model...')
+    latency, memory  = estimator(nodes, train=True)
+    print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
+    # save profiled database
+    print(f'> search [dump]: saving profiled database...')
+    estimator.save()
 
-    fstages = [stage_nodes for stage_nodes, _, _ in best_config]
-    graph.staging(tuple(stages[0] for stages in fstages))
-    
+    min_cost, best_config = layer_division(
+        nodes, resource.ngpus, tps, mbs, max_t=resource.ngpus-1)
+
+    # ======================= instantiate plan ====================
+
+    fstages = [stage_nodes for stage_nodes, dp, tp in best_config]
+    graph.staging([snodes[0] for snodes in fstages])
+
     segments = graph.select(ntype=IRSegment, flatten=False)
-    fsegments = [seg for seg in segments if seg.isfw()]
-    for devid, segment in enumerate(fsegments):
-        graph.assign(segment, devid)
+    fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
+    assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
-    sched = TSched(pp_size)
-    fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(pp_size)]
-    fdevs = [[devid] for devid in range(pp_size)]
-    bblocks = [TBlock(0, span=2, memory=-1, btype=BW) for _ in range(pp_size)]
-    bdevs = [[devid] for devid in range(pp_size)][::-1]
-    blocks = fblocks + bblocks
-    devs = fdevs + bdevs
-    sched.add_block_seq(blocks, devs)
+    devices = list(range(resource.ngpus))
+    for sid, segment in enumerate(fsegments):
+        _, dp, tp = best_config[sid]
+        stage_devices, devices = devices[:dp*tp], devices[dp*tp:]
+        assert len(stage_devices) == dp * tp
+        # apply tensor parallelism
+        print(f'> applying {tp}-way tensor parallelism')
+        stage_tp(graph, segment, stage_devices[:tp])
+        # apply data parallelism
+        if dp == 1: continue
+        else: assert False
 
-    # print(graph.extra_repr())
-    return sched
+    assert len(devices) == 0, f'not all devices are used (remaining {len(devices)})'
+
+    replica(graph, dl, fsegments[0].device)
+
+    if sched == 'vshape':
+        PredefinedSched.sched_1f1b(graph, args.gbs // args.mbs, len(fsegments))
+    elif sched == 'gpipe':
+        PredefinedSched.sched_gpipe(graph, args.gbs // args.mbs, len(fsegments))
+    else:
+        raise RuntimeError
+    return graph
 
 
 def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
@@ -222,15 +238,16 @@ def train():
         model = None
     dataloader = GPTDataLoader(args.mbs, cfg)
 
-    if args.premise == 'piper':
-        runtime_policy = partial(Piper, nmicros=args.gbs//args.mbs,
-                                 recompute=args.recompute, tp_sprog=stage_tp, db_cache=args.db_cache)
+    if args.premise == '1f1b':
+        runtime_policy = partial(PASPredefined, sched='vshape')
+    elif args.premise == 'gpipe':
+        runtime_policy = partial(PASPredefined, sched='gpipe')
     elif args.premise == 'tp':
         runtime_policy = full_tp
     else:
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
-                                 premise=premise_vshape if args.premise == 'vshape' else premise_mshape,
+                                 premise=premise_mshape,
                                  max_inflight_blks = [10] * DeviceGroup().world_size,
                                  load_plan=args.load_tsched,
                                  save_dir=args.save)

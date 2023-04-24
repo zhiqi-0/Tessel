@@ -10,7 +10,7 @@ GPU=V100
 
 # model arch
 LAYERS=32
-HIDDEN=6144
+HIDDEN=4096
 HEADS=32
 VOCAB_K=768  # 512 1024
 
@@ -20,7 +20,8 @@ VOCAB=`expr ${VOCAB_K} \* 1000`
 set -ex
 
 # PREMISE=tp
-PREMISE=piper
+PREMISE=1f1b
+PREMISE=gpipe
 # PREMISE=mshape
 
 if [ $PREMISE == "mshape" ]; then
@@ -29,7 +30,7 @@ if [ $PREMISE == "mshape" ]; then
     export ASYNC_COMM=1
 fi
 
-if [ $PREMISE == "piper" ]; then
+if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ]; then
     echo "setting param limit"
     export PARAM_LIMIT=20
 fi

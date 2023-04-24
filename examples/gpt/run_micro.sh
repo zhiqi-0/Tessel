@@ -10,7 +10,7 @@ GPU=V100
 
 # model arch
 LAYERS=36
-HIDDEN=2560
+HIDDEN=4096
 HEADS=32
 VOCAB_K=768  # 512 1024
 
@@ -18,7 +18,8 @@ VOCAB=`expr ${VOCAB_K} \* 1000`
 
 set -ex
 
-PREMISE=piper
+PREMISE=1f1b
+# PREMISE=gpipe
 # PREMISE=mshape
 
 if [ $PREMISE == "mshape" ]; then
@@ -27,14 +28,14 @@ if [ $PREMISE == "mshape" ]; then
     export ASYNC_COMM=1
 fi
 
-if [ $PREMISE == "piper" ]; then
+if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ]; then
     echo "setting param limit"
-    export PARAM_LIMIT=10
+    export PARAM_LIMIT=22
 fi
 
 NGPUS=4
 NNODES=1
-HOSTNAME=worker-0
+# HOSTNAME=worker-0
 HOSTNAME=GCRSANDBOX109
 NODE_RANK=0
 
@@ -50,6 +51,6 @@ for LAYER in ${LAYERS[@]}; do
         examples/gpt/train.py \
             --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
             --layers $LAYER --hidden $HIDDEN --heads $HEADS --seqlen 2048 --vocab $VOCAB \
-            --db-cache gpt_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
+            --db-cache gpt_${GPU}_db.json --load-tsched gpt.mshape.tsched.json # \
         2>&1 | tee -a ${LOGS}/micro.${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYER}.hidden${HIDDEN}.heads${HEADS}.${TIME}.log
 done
