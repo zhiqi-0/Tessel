@@ -92,7 +92,7 @@ def PAS1F1B(graph: IRGraph, resource):
     mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
     tps = partial(TPS, recompute=False, 
-                  estimator=estimator_fn, mem_limit=mem_limit)
+                  estimator=estimator_fn, mem_limit=mem_limit, train=False)
     print(f'> search [initialize]: profiling model...')
     latency, memory = estimator_fn(nodes)
     print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
@@ -100,6 +100,13 @@ def PAS1F1B(graph: IRGraph, resource):
     print(f'> search [dump]: saving profiled database...')
     estimator.save()
 
+    # decrease search space
+    anchors = [n for n in nodes if isinstance(n, IRGraphAnchor)]
+    if len(anchors) > 48:
+        nodes = list(nodes)
+        for anchor in anchors[::2]:
+            nodes.remove(anchor)
+        nodes = tuple(nodes)
     min_cost, best_config = layer_division(
         nodes, resource.ngpus, tps, mbs, max_t=1, max_d=1)
     
@@ -131,7 +138,7 @@ def PASYShape(graph: IRGraph, resource):
     mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
     tps = partial(TPS, recompute=False, 
-                  estimator=estimator_fn, mem_limit=mem_limit)
+                  estimator=estimator_fn, mem_limit=mem_limit, train=False)
     print(f'> search [initialize]: profiling model...')
     latency, memory = estimator_fn(nodes)
     print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
@@ -178,6 +185,8 @@ def PASYShape(graph: IRGraph, resource):
     replica(graph, dl, list(range(resource.ngpus)))
 
     # print(graph.extra_repr())
+    if args.gbs // args.mbs == 1:
+        return graph
 
     tsched = TSched.load(args.load_tsched)
     print(f'>>> loaded tschedule: \n{tsched}')
@@ -230,12 +239,12 @@ def inference():
         runtime_policy = PASTP
 
     model = cube.SemanticModel(model)
-    @cube.compile(model, dataloader, PAS=runtime_policy)
+    @cube.compile(model, dataloader, PAS=runtime_policy, load_content=False)
     def serve(model, dataloader):
         image, text = next(dataloader)
         logits = model(image, text)
     
-    model = cube.load_model()
+    model = cube.load_model(load_content=False)
 
     torch.distributed.barrier()
     print_each_rank('model weight consumption:')
