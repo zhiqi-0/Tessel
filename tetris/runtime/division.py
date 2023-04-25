@@ -18,7 +18,7 @@ from tetris.runtime.flags import SearchFlag
 
 
 def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
-        recompute: bool, estimator: Callable, mem_limit: int) -> Optional[float]:
+        recompute: bool, estimator: Callable, mem_limit: int, train: bool=True) -> Optional[float]:
     """
     Get timer per sample (latency) of executing the nodes
     
@@ -45,19 +45,19 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
         latency, act_memory = estimator(layer_op.nodes)
         # activation memory
         act_memory = act_memory / (t * d) * tp_mem_efficiency
-        # recompute granularity: per stage
-        # inflight = 1 if recompute else inflight
-        # total_act_memory += act_memory * inflight
-
         # recompute granularity: per layer
-        total_act_memory = max(total_act_memory, act_memory) if recompute \
-            else total_act_memory + act_memory * inflight
-
+        if train:
+            total_act_memory = max(total_act_memory, act_memory) if recompute \
+                else total_act_memory + act_memory * inflight
+        else:
+            total_act_memory = max(total_act_memory, act_memory)
         # latency
         if recompute:
             latency = latency / 3 * 4  # suppose forward:backward=1:2
         latency = latency / (t * d) * tp_com_efficienty
         total_latency += latency
+
+    optimizer_factor = 4 if train else 1
 
     # parameter size
     param_size = 0
@@ -69,7 +69,7 @@ def TPS(nodes: List[IRLayerOp], d: int, t: int, inflight: int,
                     factor = 1 # if tensor.byte_size() // t <= 1.5 * 1024 * 1024 * 1024 else 1.5
                     param_size += tensor.byte_size() * factor
     # consider gradient and adam optimizer (totally 3x param size)
-    param_size = param_size * 4 / t
+    param_size = param_size * optimizer_factor / t
     total_memory = param_size + total_act_memory
     # only apply to stage with layer 0 if param limit is set
     if nodes[0].layer_id == 0:
