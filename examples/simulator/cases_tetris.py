@@ -134,7 +134,7 @@ class Premise:
         return sched
     
     @staticmethod
-    def mshape(ndevs: int, train: bool = False) -> SchedPlan:
+    def mshape(ndevs: int, train: bool = True) -> SchedPlan:
         """
         f f             b b
         f   f         b   b
