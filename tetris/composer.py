@@ -26,6 +26,8 @@ class Composer:
             mem = [memory[devid] - warmup_mem.get(devid, 0) for devid in range(ndevs)]
             repetend, case_nbubbles = Composer.construct(
                 repetend_blks, repetend_devs, ndevs, mem, nbubbles, optimizer=BubbleOptimalSolver)
+            # repetend, case_nbubbles = Composer.construct(
+            #     repetend_blks, repetend_devs, ndevs, mem, nbubbles, optimizer=StepOptimalSolver)
             if repetend is None: continue
             
             # step 2: construct warmup
@@ -67,11 +69,11 @@ class Composer:
             for idx2, blk2 in enumerate(blocks):
                 if blk2 in blk1.after:
                     # print(f'> add dependency: {blk1}-dev{devices[idx1]} -> {blk2}-dev{devices[idx2]}')
-                    solver.add_dependency([blk1, blk2])
+                    solver.add_dependency_constraints([blk1, blk2])
         # step 3 construct
         lowest = solver.solve(memory, upper)
         if lowest is None:
-            print(f"Fail to find a solution given boundary constraints [upper(unreachable)={upper}]\n")
+            print(f"{optimizer.__name__}: Fail to find a solution given boundary constraints ( solution > {upper} (upper) )\n")
             return None, None
         for schedplan in solver.solutions():
             # assert schedplan.nsteps == nsteps

@@ -42,7 +42,8 @@ class SolverBase:
         self._blocks: Set[Block] = set()
         self._ndevs = ndevs
         self._block_devices: Dict[Block, List[int]] = {}
-        self._block_steps: Dict[Block, z3.ArithRef] = {} # the start step
+        self._block_starts: Dict[Block, z3.ArithRef] = {} # the start step
+        self._block_stops: Dict[Block, z3.ArithRef] = {}   # the end step
         self._mem: List[z3.ArithRef] = [None] * ndevs
         self._solution: Optional[z3.z3.ModelRef] = None
         self._solved = False
@@ -66,34 +67,34 @@ class SolverBase:
         assert block in self._blocks
         return self._block_devices[block]
 
-    def step(self, block: Block) -> z3.ArithRef:
+    def start(self, block: Block) -> z3.ArithRef:
         assert block in self._blocks, f"{block} not in the solver scope"
-        return self._block_steps[block]
+        return self._block_starts[block]
+
+    def stop(self, block: Block) -> z3.ArithRef:
+        assert block in self._blocks, f"{block} not in the solver scope"
+        return self._block_stops[block]
     
     def add_block(self, block: Block, devs: List[int], step: int):
+        assert block not in self._block_devices, f"Block {block} already exists"
         self._solved, self._solution = False, None
         self._block_devices[block] = devs
         start = z3.Int('blk' + str(len(self._block_devices)))
         end = start + block.span
-        self._block_steps[block] = start
+        self._block_starts[block] = start
+        self._block_stops[block] = end
         self._solver.add(start >= step)
         # intra-device: no overlapping constraints
+        visited = set()
         for devid in devs:
             blocks = [blk for blk in self._blocks if devid in self.device(blk)]
+            blocks = [blk for blk in blocks if blk not in visited]
             for blk in blocks:
-                bstart = self.step(blk)
-                bend = bstart + blk.span
-                min_end = z3.If(bend < end, bend, end)
-                max_start = z3.If(bstart > start, bstart, start)
-                self._solver.add(min_end <= max_start)
+                bstart = self.start(blk)
+                bend = self.stop(blk)
+                self._solver.add(z3.Or(bend <= start, end <= bstart))
+            visited.update(blocks)
         self._blocks.add(block)
-
-    def add_dependency(self, blocks: List[Block]):
-        self._solved, self._solution = False, None
-        for idx in range(len(blocks) - 1):
-            pre, post = blocks[idx], blocks[idx+1]
-            pre_t, post_t = self.step(pre), self.step(post)
-            self._solver.add(pre_t + pre.span <= post_t)
 
     def add_micro_plan(self, micro: SchedPlan):
         self._solved, self._solution = False, None
@@ -103,14 +104,27 @@ class SolverBase:
             self.add_block(block, devs, step)
         for block in micro.all_blocks():
             for after_block in block.after:
-                self.add_dependency([block, after_block])
+                self.add_dependency_constraints([block, after_block])
+
+    def add_dependency_constraints(self, blocks: List[Block]):
+        self._solved, self._solution = False, None
+        for idx in range(len(blocks) - 1):
+            pre, post = blocks[idx], blocks[idx+1]
+            pre_stop, post_start = self.stop(pre), self.start(post)
+            self._solver.add(pre_stop <= post_start)
     
-    def init_peak_mem(self):
-        """
+    def add_memory_constraints(self, dev_mem_limits: List[int]):
+        """Add memory constraints for each device
+
         This can only be called after all blocks added
         """
+        assert self.ndevs == len(dev_mem_limits)
         peak_mem_per_dev = []
         maxspan = sum(blk.span for blk in self._blocks)
+        # add block stop time constraints
+        for block in self._blocks:
+            self._solver.add(self.stop(block) <= maxspan)
+        # add memory constraints
         for devid in range(self.ndevs):
             peak = 0
             curr = 0
@@ -118,9 +132,10 @@ class SolverBase:
             for step in range(0, maxspan):
                 mem = 0
                 for block in blocks:
-                    mem = z3.If(self.step(block) == step, block.memory, mem)
+                    mem = z3.If(self.start(block) == step, block.memory, mem)
                 curr = mem + curr
                 peak = z3.If(curr > peak, curr, peak)
+            self._solver.add(peak <= dev_mem_limits[devid])
             peak_mem_per_dev.append(peak)
         self._mem = peak_mem_per_dev
 
@@ -129,13 +144,13 @@ class SolverBase:
         """
         gid_blocks: Dict[int, List[Block]] = {}
         for block in self._blocks:
-            if block.gid is None: continue
+            assert block.gid is not None
             gid_blocks.setdefault(block.gid, []).append(block)
         for blocks in gid_blocks.values():
             blocks = sorted(blocks, key=lambda blk: blk.mid)
             if len(blocks) <= 1: continue
             for blk1, blk2 in more_itertools.windowed(blocks, 2):
-                self._solver.add(self.step(blk1) < self.step(blk2))
+                self._solver.add(self.start(blk1) < self.start(blk2))
 
     def solve(self, var, upper_var: int, lower_var: int, silence = True) -> Optional[int]:
         """Find lowest value for var given boundary of [upper_var, lower_var)"""
@@ -156,18 +171,20 @@ class SolverBase:
             try_var = (lower + upper) // 2
             self._solver.push()
             self._solver.add(var == try_var)
+            if not silence:
+                sys.stdout.write('checking solution of {:<4}.........'.format(try_var))
             if self._solver.check() == z3.sat:
-                if not silence: print(f'find solution of {try_var}')
+                if not silence: print(f'Yes', flush=True)
                 sys.stdout.flush()
                 self._solution = self._solver.model()
                 upper, opt = try_var, try_var
             else:
-                if not silence: print(f'fail to find solution of {try_var}')
+                if not silence: print(f'Fail', flush=True)
                 sys.stdout.flush()
                 lower = try_var + 1
             self._solver.pop()
         if self._solution is not None:
-            if not silence: print(f'find optimal solution of {opt}')
+            if not silence: print(f'find optimal solution of {opt}', flush=True)
             sys.stdout.flush()
         self._solved = True
         return opt if self._solution is not None else None
@@ -185,11 +202,11 @@ class SolverBase:
         while self._solver.check() == z3.sat:
             solution: Dict[Block, int] = dict()
             model = self._solver.model()
-            for blk, t in self._block_steps.items():
+            for blk, t in self._block_starts.items():
                 solution[blk] = model.eval(t).as_long()
             # solution to schedule plan
             schedplan = SchedPlan(self.ndevs)
-            for blk, t in self._block_steps.items():
+            for blk, t in self._block_starts.items():
                 step = model.eval(t).as_long()
                 schedplan.add_block(blk, self.device(blk), step)
             yield schedplan
@@ -208,8 +225,7 @@ class StepOptimalSolver(SolverBase):
     def init_nsteps(self):
         self._nsteps = 0
         for block in self._blocks:
-            start = self.step(block)
-            end = start + block.span
+            end = self.stop(block)
             self._nsteps = z3.If(end > self._nsteps, end, self._nsteps)
 
     def solve(self, memory: List[int], upper_time: Optional[int] = None, silence = True) -> Optional[int]:
@@ -220,9 +236,7 @@ class StepOptimalSolver(SolverBase):
         self.mono_mid_constraints()
         self._solution = None
         if not silence: print('memory constraints:', memory)
-        self.init_peak_mem()
-        for devid in range(self.ndevs):
-            self._solver.add(self._mem[devid] <= memory[devid])
+        self.add_memory_constraints(memory)
 
         self.init_nsteps()
         upper = upper_time if upper_time is not None \
@@ -268,8 +282,8 @@ class BubbleOptimalSolver(SolverBase):
         for devid in range(self.ndevs):
             blocks = [blk for blk in self._blocks if devid in self.device(blk)]
             # [min start-step, max end-step)
-            minstep = _z3_min([self.step(block) for block in blocks])
-            maxstep = _z3_max([self.step(block) + block.span for block in blocks])
+            minstep = _z3_min([self.start(block) for block in blocks])
+            maxstep = _z3_max([self.stop(block) for block in blocks])
             span = maxstep - minstep
             dev_span.append(span)
             dev_step.append(sum(blk.span for blk in blocks))
@@ -283,17 +297,17 @@ class BubbleOptimalSolver(SolverBase):
                 ablocks = list(block.after)
                 keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
                 ablocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
-                astarts = [self.step(blk) for blk in ablocks]
+                astarts = [self.start(blk) for blk in ablocks]
                 if len(astarts) != 0:
-                    min_ofst = _z3_min(astarts) - self.step(block) - rspan
+                    min_ofst = _z3_min(astarts) - self.start(block) - rspan
                     rofst = _z3_max([rofst, min_ofst])
                 # before blocks
                 bblocks =  list(block.before)
                 keys = [(blk.gid, blk.mid + 1) for blk in bblocks]
                 bblocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
-                bends = [self.step(blk) + blk.span for blk in bblocks]
+                bends = [self.start(blk) + blk.span for blk in bblocks]
                 if len(bends) != 0:
-                    min_ofst = _z3_max(bends) - self.step(block) - rspan
+                    min_ofst = _z3_max(bends) - self.start(block) - rspan
                     rofst = _z3_max([rofst, min_ofst])
         
         dev_bubbles = []
@@ -309,8 +323,8 @@ class BubbleOptimalSolver(SolverBase):
         #     # device bubble = internal empty slots + tail must wait slots
         #     blocks = [blk for blk in self._blocks if devid in self.device(blk)]
         #     # [min start-step, max end-step)
-        #     minstep = _z3_min([self.step(block) for block in blocks])
-        #     maxstep = _z3_max([self.step(block) + block.span for block in blocks])
+        #     minstep = _z3_min([self.start(block) for block in blocks])
+        #     maxstep = _z3_max([self.start(block) + block.span for block in blocks])
         #     span = maxstep - minstep
         #     # get internal empty slots
         #     total_steps = sum(blk.span for blk in blocks)
@@ -322,7 +336,7 @@ class BubbleOptimalSolver(SolverBase):
         #         ablocks = [blk for blk in block.after]
         #         keys = [(blk.gid, blk.mid + 1) for blk in ablocks]
         #         ablocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
-        #         astarts = [self.step(blk) for blk in ablocks]
+        #         astarts = [self.start(blk) for blk in ablocks]
         #         if len(astarts) != 0:
         #             min_start = _z3_min(astarts) - maxstep
         #             ofst = _z3_max([ofst, min_start])
@@ -331,7 +345,7 @@ class BubbleOptimalSolver(SolverBase):
         #         bblocks = [blk for blk in block.before]
         #         keys = [(blk.gid, blk.mid + 1) for blk in bblocks]
         #         bblocks = [gid_mid_blocks[key] for key in keys if key in gid_mid_blocks]
-        #         bends = [self.step(blk) + blk.span for blk in bblocks]
+        #         bends = [self.start(blk) + blk.span for blk in bblocks]
         #         if len(bends) != 0:
         #             min_start = _z3_max(bends) - maxstep
         #             ofst = _z3_max([ofst, min_start])
@@ -347,14 +361,13 @@ class BubbleOptimalSolver(SolverBase):
         """
         maxstep = 0
         for block in self._blocks:
-            end = self.step(block) + block.span
+            end = self.start(block) + block.span
             maxstep = z3.If(end > maxstep, end, maxstep)
         for step in range(sum(block.span for block in self._blocks)):
             have_block = False
             for block in self._blocks:
-                begin = self.step(block)
-                end = begin + block.span
-                have_block = z3.Or(have_block, z3.And(begin <= step, step < end))
+                start, stop = self.start(block), self.stop(block)
+                have_block = z3.Or(have_block, z3.And(start <= step, step < stop))
             self._solver.add(z3.If(step < maxstep, have_block, True))
 
     def solve(self, memory: List[int], upper_nbubbles: Optional[int] = None, silence=True) -> Optional[int]:
@@ -364,9 +377,7 @@ class BubbleOptimalSolver(SolverBase):
         self.mono_mid_constraints()
         # init memory
         if not silence: print('memory constraints:', memory)
-        self.init_peak_mem()
-        for devid in range(self.ndevs):
-            self._solver.add(self._mem[devid] <= memory[devid])
+        self.add_memory_constraints(memory)
         
         # init bubble
         self.init_bubble()
