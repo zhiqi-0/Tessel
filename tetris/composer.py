@@ -71,7 +71,7 @@ class Composer:
                     # print(f'> add dependency: {blk1}-dev{devices[idx1]} -> {blk2}-dev{devices[idx2]}')
                     solver.add_dependency_constraints([blk1, blk2])
         # step 3 construct
-        lowest = solver.solve(memory, upper)
+        lowest = solver.solve(memory, upper, silence=True)
         if lowest is None:
             print(f"{optimizer.__name__}: Fail to find a solution given boundary constraints ( solution > {upper} (upper) )\n")
             return None, None

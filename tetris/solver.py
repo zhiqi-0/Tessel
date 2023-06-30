@@ -173,6 +173,7 @@ class SolverBase:
             self._solver.add(var == try_var)
             if not silence:
                 sys.stdout.write('checking solution of {:<4}.........'.format(try_var))
+                sys.stdout.flush()
             if self._solver.check() == z3.sat:
                 if not silence: print(f'Yes', flush=True)
                 sys.stdout.flush()
