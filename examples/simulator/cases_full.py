@@ -260,7 +260,7 @@ if __name__ == '__main__':
     memory = [args.inflight] * args.ndevs
 
     print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
-    print(micros[0])
+    print(micros[0], flush=True)
 
     all_blocks = []
     all_devices = []
