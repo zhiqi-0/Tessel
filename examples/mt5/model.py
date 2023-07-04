@@ -2,7 +2,7 @@ import torch
 import cube
 
 from dataclasses import dataclass
-from example.mt5.blocks import EncoderLayer, DecoderLayer
+from examples.mt5.blocks import EncoderLayer, DecoderLayer
 
 
 @dataclass
@@ -27,7 +27,7 @@ class mT5(torch.nn.Module):
         super().__init__()
         self.embedw = torch.nn.Parameter(torch.empty(cfg.vocab_size, cfg.d_model))
         
-        self.encoder_position = torch.nn.Embedding(cfg.seqlen, cfg.embed_dim)
+        self.encoder_position = torch.nn.Embedding(cfg.seqlen, cfg.d_model)
         self.embed_dropout = torch.nn.Dropout(p=0.0)
 
         self.encoders = torch.nn.ModuleList(
@@ -39,7 +39,7 @@ class mT5(torch.nn.Module):
         )
 
 
-        self.decoder_position = torch.nn.Embedding(cfg.seqlen, cfg.embed_dim)
+        self.decoder_position = torch.nn.Embedding(cfg.seqlen, cfg.d_model)
         self.decoders = torch.nn.ModuleList(
             [DecoderLayer(
                 cfg.d_model, cfg.num_heads, cfg.d_ff,
@@ -108,7 +108,7 @@ class mT5DataLoader(cube.runtime.syndata.CubeDataLoader):
     def set_batch_size(self, bs: int):
         self.batch_size = bs
         encoder_input_ids = torch.randint(
-            0, self.cfg.num_embeddings,
+            0, self.cfg.vocab_size,
             size=(self.batch_size, self.cfg.seqlen),
             dtype=torch.int64, device=torch.cuda.current_device()
         )
@@ -117,7 +117,7 @@ class mT5DataLoader(cube.runtime.syndata.CubeDataLoader):
         ).repeat(self.batch_size).view(self.batch_size, -1)
 
         decoder_input_ids = torch.randint(
-            0, self.cfg.num_embeddings,
+            0, self.cfg.vocab_size,
             size=(self.batch_size, self.cfg.seqlen),
             dtype=torch.int64, device=torch.cuda.current_device()
         )

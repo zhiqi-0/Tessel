@@ -144,7 +144,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
 
     assert len(devices) == 0, f'not all devices are used (remaining {len(devices)})'
 
-    replica(graph, dl, fsegments[0].device)
+    replica(graph, dl, list(range(resource.ngpus)))
 
     if sched == 'vshape':
         PredefinedSched.sched_1f1b(graph, args.gbs // args.mbs, len(fsegments))

@@ -26,38 +26,38 @@ VOCAB=1024000
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 2 --hidden 2560 --heads 32 --seqlen 2048 --vocab $VOCAB \
+        --fp16 --mbs 1 --gbs 1 --premise 1f1b --recompute \
+        --layers 2 --hidden 2560 --heads 32 --seqlen 1024 --vocab $VOCAB \
         --db-cache mt5_${GPU}_db.json
 
 
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 2 --hidden 4096 --heads 32 --seqlen 2048 --vocab $VOCAB \
+        --fp16 --mbs 1 --gbs 1 --premise 1f1b --recompute \
+        --layers 2 --hidden 4096 --heads 32 --seqlen 1024 --vocab $VOCAB \
         --db-cache mt5_${GPU}_db.json
 
 
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 2 --hidden 5120 --heads 32 --seqlen 2048 --vocab $VOCAB \
+        --fp16 --mbs 1 --gbs 1 --premise 1f1b --recompute \
+        --layers 2 --hidden 5120 --heads 32 --seqlen 1024 --vocab $VOCAB \
         --db-cache mt5_${GPU}_db.json
 
 
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 2 --hidden 6144 --heads 48 --seqlen 2048 --vocab $VOCAB \
+        --fp16 --mbs 1 --gbs 1 --premise 1f1b --recompute \
+        --layers 2 --hidden 6144 --heads 48 --seqlen 1024 --vocab $VOCAB \
         --db-cache mt5_${GPU}_db.json
 
 
 PYTHONPATH=.:$PYTHONPATH OMP_NUM_THREADS=4 torchrun \
     --nproc_per_node=4 \
     examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 1 --premise piper --recompute \
-        --layers 2 --hidden 8192 --heads 64 --seqlen 2048 --vocab $VOCAB \
+        --fp16 --mbs 1 --gbs 1 --premise 1f1b --recompute \
+        --layers 2 --hidden 8192 --heads 64 --seqlen 1024 --vocab $VOCAB \
         --db-cache mt5_${GPU}_db.json

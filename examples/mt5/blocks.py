@@ -186,15 +186,16 @@ class MLP(torch.nn.Module):
 class EncoderLayer(torch.nn.Module):
 
     def __init__(self, embed_dim: int, num_heads: int, ffn_hidden_dim: int,
-                 hidden_dropout: float = 0.0, attn_dropout: float = 0.0, activation_dropout: float = 0.0):
+                 hidden_dropout: float = 0.0, attn_dropout: float = 0.0, activation_dropout: float = 0.0,
+                 layernomr_eps: float = 1e-6):
         super().__init__()
         self.self_attn = MultiHeadSelfAttention(
             embed_dim, num_heads, embed_dim, attn_dropout
         )
-        self.self_attn_layer_norm = torch.nn.LayerNorm(embed_dim)
+        self.self_attn_layer_norm = torch.nn.LayerNorm(embed_dim, eps=layernomr_eps)
         self.dropout = torch.nn.Dropout(p=hidden_dropout)
         self.mlp = MLP(embed_dim, ffn_hidden_dim, activation_dropout)
-        self.final_layer_norm = torch.nn.LayerNorm(embed_dim)
+        self.final_layer_norm = torch.nn.LayerNorm(embed_dim, eps=layernomr_eps)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
