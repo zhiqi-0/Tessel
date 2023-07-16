@@ -2,6 +2,7 @@
 from typing import List, Callable
 import torch
 from functools import partial
+import warnings
 
 from examples.mt5.model import Config, mT5, mT5DataLoader
 
@@ -15,6 +16,7 @@ from cube.graph.segment import IRSegment
 from cube.graph.function.anchor import IRGraphAnchor
 from cube.ir.operator import IRFwOperation, IRDataOperation
 from cube.runtime.device import DeviceGroup
+from cube.graph.function.dimops import IRDimops
 
 from tetris.runtime.utils import tp, replica, annotate_structure
 from tetris.runtime.division import TPS, layer_division
@@ -37,7 +39,7 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'nnshape', 'gpipe', 'tp'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -61,10 +63,10 @@ if SearchFlag.mem_limit is not None:
 
 # ========================= parallelisms =================================
 
-def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
+def stage_tp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]) -> IRSegment:
     """Tensor parallelsim a stage"""
     ndevs = len(devs)
-    for fnode in segment.select(ntype=IRFwOperation):
+    for fnode in nodes:
         if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
         if fnode.name == 'embedding' and fnode.input(1).shape[0] > 10240:
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
@@ -76,7 +78,6 @@ def stage_tp(graph: IRGraph, segment: IRSegment, devs: List[int]) -> IRSegment:
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         else:
             replica(graph, fnode, devs)
-    return segment
 
 
 def full_tp(graph: IRGraph, resource):
@@ -87,7 +88,7 @@ def full_tp(graph: IRGraph, resource):
             graph.recompute(transformer)
 
     devs = list(range(resource.ngpus))
-    stage_tp(graph, graph, devs)
+    stage_tp(graph, graph.select(ntype=IRFwOperation), devs)
     for dl in graph.select(ntype=IRDataOperation):
         replica(graph, dl, devs)
     return graph
@@ -137,7 +138,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
         assert len(stage_devices) == dp * tp
         # apply tensor parallelism
         print(f'> applying {tp}-way tensor parallelism')
-        stage_tp(graph, segment, stage_devices[:tp])
+        stage_tp(graph, segment.select(ntype=IRFwOperation), stage_devices[:tp])
         # apply data parallelism
         if dp == 1: continue
         else: assert False
@@ -152,6 +153,73 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
         PredefinedSched.sched_gpipe(graph, args.gbs // args.mbs, len(fsegments))
     else:
         raise RuntimeError
+    return graph
+
+
+def PASChimera(graph: IRGraph, resource):
+    """Chimera Direct policy"""
+    transformers = annotate_structure(graph)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
+    nodes = tuple(graph.select(ntype=IRFwOperation))
+
+    dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
+    mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
+
+    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    print(f'> search [constraints]: device limitied memory: {mem_limit}')
+
+    # for chimera, we constrain the tensor parallelism size of each pipeline to be same
+    # due to its special scheduling polies.
+    assert resource.ngpus % 4 == 0
+    tp_size = resource.ngpus // 4
+    mem_limit = mem_limit * tp_size
+
+    estimator = Estimator(args.db_cache)
+    tps = partial(TPS, recompute=args.recompute, 
+                  estimator=estimator, mem_limit=mem_limit)
+    print(f'> search [initialize]: profiling model...')
+    latency, memory  = estimator(nodes, train=True)
+    print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
+    # save profiled database
+    print(f'> search [dump]: saving profiled database...')
+    estimator.save()
+
+    min_cost, best_config = layer_division(
+        nodes, 4, tps, mbs, max_t=1, max_d=1)
+
+    # ======================= instantiate plan ====================
+
+    fstages = [stage_nodes for stage_nodes, dp, tp in best_config]
+    graph.staging([snodes[0] for snodes in fstages])
+
+    segments = graph.select(ntype=IRSegment, flatten=False)
+    fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
+    assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
+
+    for sid, segment in enumerate(fsegments):
+        dp_devs = {0: [0, 3], 1: [1, 2], 2: [2, 1], 3: [3, 0]}[sid]
+        mb1_devs = [dp_devs[0] * tp_size + i for i in range(tp_size)]
+        mb2_devs = [dp_devs[1] * tp_size + i for i in range(tp_size)]
+        for node in segment.select(ntype=IRFwOperation):
+            # 2-way data parallelism
+            if isinstance(node, IRDimops):
+                algo = node.algorithms('dim')
+                dim = node.input(0).shape.index(mbs)
+                mb1, mb2 = graph.partition(node, algo, idx=0, dim=dim, num=2)
+            else:
+                if not isinstance(node, IRGraphAnchor):
+                    warnings.warn(
+                        f'node: {node}\ncannot split node into two micro-batches, use replicate instead.',
+                        category=RuntimeWarning, stacklevel=0)
+                mb1, mb2 = graph.replicate(node, times=2)
+            # tensor parallelism
+            stage_tp(graph, [mb1], mb1_devs)
+            stage_tp(graph, [mb2], mb2_devs)
+
+    replica(graph, dl, graph.device)
+    PredefinedSched.sched_chimera_direct(graph, args.gbs // args.mbs, len(fsegments))
     return graph
 
 
@@ -182,13 +250,13 @@ def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
     fsegments = [seg for seg in segments if seg.isfw()]
 
     tp_devs = list(range(ndevs))
-    stage_tp(graph, fsegments[0], tp_devs)
+    stage_tp(graph, fsegments[0].select(ntypes=IRFwOperation), tp_devs)
 
     curr_devs = 0
     for segment, (_, dp, tp) in zip(fsegments[1:], best_config):
         stage_ndevs = dp * tp
         if stage_ndevs > 1:
-            stage_tp(graph, segment, 
+            stage_tp(graph, segment.select(ntypes=IRFwOperation), 
                      list(range(curr_devs, curr_devs + stage_ndevs)))
         else:
             graph.assign(segment, curr_devs)
@@ -224,6 +292,23 @@ def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
 
 def train():
 
+    if args.premise == '1f1b':
+        runtime_policy = partial(PASPredefined, sched='vshape')
+    elif args.premise == 'gpipe':
+        runtime_policy = partial(PASPredefined, sched='gpipe')
+    elif args.premise == 'tp':
+        runtime_policy = full_tp
+    elif args.premise == 'chimera':
+        runtime_policy = partial(PASChimera)
+        args.mbs = 2 if args.mbs == 1 else args.mbs # double for chimera execution
+    else:
+        runtime_policy = partial(tsched,
+                                 num_microbatches = args.gbs//args.mbs,
+                                 premise=premise_nnshape,
+                                 max_inflight_blks = [10] * DeviceGroup().world_size,
+                                 load_plan=args.load_tsched,
+                                 save_dir=args.save)
+
     # setup model arg
     cfg = Config(
         args.vocab,
@@ -243,20 +328,6 @@ def train():
     else:
         model = None
     dataloader = mT5DataLoader(args.mbs, cfg)
-
-    if args.premise == '1f1b':
-        runtime_policy = partial(PASPredefined, sched='vshape')
-    elif args.premise == 'gpipe':
-        runtime_policy = partial(PASPredefined, sched='gpipe')
-    elif args.premise == 'tp':
-        runtime_policy = full_tp
-    else:
-        runtime_policy = partial(tsched,
-                                 num_microbatches = args.gbs//args.mbs,
-                                 premise=premise_nnshape,
-                                 max_inflight_blks = [10] * DeviceGroup().world_size,
-                                 load_plan=args.load_tsched,
-                                 save_dir=args.save)
 
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 

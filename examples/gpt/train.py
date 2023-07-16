@@ -95,7 +95,7 @@ def full_tp(graph: IRGraph, resource):
             graph.recompute(transformer)
 
     devs = list(range(resource.ngpus))
-    stage_tp(graph, graph, devs)
+    stage_tp(graph, graph.select(ntype=IRFwOperation), devs)
     for dl in graph.select(ntype=IRDataOperation):
         replica(graph, dl, devs)
     return graph
@@ -256,13 +256,13 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
     fsegments = [seg for seg in segments if seg.isfw()]
 
     tp_devs = list(range(ndevs))
-    stage_tp(graph, fsegments[0], tp_devs)
+    stage_tp(graph, fsegments[0].select(ntype=IRFwOperation), tp_devs)
 
     curr_devs = 0
     for segment, (_, dp, tp) in zip(fsegments[1:], best_config):
         stage_ndevs = dp * tp
         if stage_ndevs > 1:
-            stage_tp(graph, segment, 
+            stage_tp(graph, segment.select(ntype=IRFwOperation), 
                      list(range(curr_devs, curr_devs + stage_ndevs)))
         else:
             graph.assign(segment, curr_devs)

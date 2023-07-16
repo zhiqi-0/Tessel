@@ -10,13 +10,13 @@ mkdir -p $LOGS
 GPU=V100
 
 # model arch
-LAYERS=48
+LAYERS=80
 HIDDEN=8192
 HEADS=64
-VOCAB_K=1024 # 512 1024
+VOCAB_K=1536 # 512 1024
 
 NGPUS=8
-NNODES=2
+NNODES=4
 HOSTNAME=worker-0
 # HOSTNAME=GCRSANDBOX109
 # NODE_RANK=0
@@ -37,7 +37,7 @@ if [ $PREMISE == "mshape" ]; then
     export ASYNC_COMM=1
 fi
 
-if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ]; then
+if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ] || [ $PREMISE == 'chimera' ]; then
     echo "setting param limit"
     export PARAM_LIMIT=20
 fi

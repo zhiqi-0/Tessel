@@ -10,13 +10,13 @@ mkdir -p $LOGS
 GPU=V100
 
 # model arch
-LAYERS=12
+LAYERS=16
 HIDDEN=4096
 HEADS=32
-VOCAB_K=64
+VOCAB_K=512
 
-NGPUS=8
-NNODES=2
+NGPUS=4
+NNODES=1
 HOSTNAME=worker-0
 # HOSTNAME=GCRSANDBOX109
 # NODE_RANK=0
@@ -28,7 +28,8 @@ set -ex
 # PREMISE=tp
 # PREMISE=1f1b
 # PREMISE=gpipe
-PREMISE=mshape
+PREMISE=chimera
+# PREMISE=nnshape
 
 if [ $PREMISE == "nnshape" ]; then
     echo "enabling async communication"
@@ -38,7 +39,7 @@ fi
 
 if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ]; then
     echo "setting param limit"
-    export PARAM_LIMIT=20
+    export PARAM_LIMIT=22
 fi
 
 # export MEM_LIMIT=16
@@ -48,10 +49,19 @@ TOTAL_GPUS=`expr ${NGPUS} \* ${NNODES}`
 TIME=`date "+%m-%d-%H-%M"`
 
 
-torchrun --nproc_per_node=$NGPUS \
-    --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
-    examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
-        --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 2048 --vocab $VOCAB \
-        --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.tsched.json \
-    2>&1 | tee -a ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.${TIME}.log
+if [ "$NNODES" -gt "1" ]; then
+    torchrun --nproc_per_node=$NGPUS \
+        --nnodes=$NNODES --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
+        examples/mt5/train.py \
+            --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
+            --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
+            --db-cache mt5_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
+        2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
+else
+    torchrun --nproc_per_node=$NGPUS \
+        examples/mt5/train.py \
+            --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
+            --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
+            --db-cache mt5_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
+        2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
+fi

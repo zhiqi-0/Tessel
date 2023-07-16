@@ -17,7 +17,6 @@ class Config:
     dropout: float = 0.2
     attn_dropout: float = 0.2
     activation_dropout: float = 0.2
-    moe_size: int = 1
 
 
 class GPT(torch.nn.Module):

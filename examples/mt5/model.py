@@ -66,7 +66,7 @@ class mT5(torch.nn.Module):
         embed = self.embed_dropout(embed)
 
         # encoder
-        enc = embed
+        enc = embed.transpose(0, 1)
         for encoder in self.encoders:
             cube.runtime.function.anchor('encoder start')
             enc = encoder(enc)
@@ -81,7 +81,7 @@ class mT5(torch.nn.Module):
         embed = self.embed_dropout(embed)
 
         # decoder
-        dec = embed
+        dec = embed.transpose(0, 1)
         for decoder in self.decoders:
             cube.runtime.function.anchor('decoder start')
             dec = decoder(dec, enc)
