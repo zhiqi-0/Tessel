@@ -72,6 +72,7 @@ class mT5(torch.nn.Module):
             enc = encoder(enc)
 
         # decoder input ids
+        cube.runtime.function.anchor('decorder embedding')
         embed = torch.nn.functional.embedding(
             decoder_input_ids, self.embedw, padding_idx=None,
             max_norm=None, norm_type=2., scale_grad_by_freq=False, sparse=False
