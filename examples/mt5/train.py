@@ -250,9 +250,9 @@ def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
     
     # policy search for balanced pipeline stages
     encoder_min_cost, encoder_config = layer_division(
-        list(itertools.chain(*encoders)), ndevs // 2, tps, args.mbs, max_d=1, max_t=ndevs // 4)
+        list(itertools.chain(*encoders)), ndevs // 2, tps, args.mbs, max_d=1, max_t=ndevs // 4, max_p=2)
     decoder_min_cost, decoder_config = layer_division(
-        list(itertools.chain(*decoders)), ndevs // 2, tps, args.mbs, max_d=1, max_t=ndevs // 4)
+        list(itertools.chain(*decoders)), ndevs // 2, tps, args.mbs, max_d=1, max_t=ndevs // 4, max_p=2)
 
     fstages = [embed1] + [snodes for snodes, _, _ in encoder_config] + \
               [embed2] + [snodes for snodes, _, _ in decoder_config]
