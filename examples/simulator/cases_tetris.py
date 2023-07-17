@@ -102,6 +102,41 @@ class Premise:
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
         return sched
+
+    @staticmethod
+    def nnshape_eager(ndevs: int, train: bool = True) -> SchedPlan:
+        """
+        f f f             b b b
+        f   f f         b b   b
+        f   f   f     b   b   b
+        f   f     f b     b   b
+        """
+        assert ndevs == 4
+        sched = SchedPlan(ndevs)
+        # v-shape
+        fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs = [[devid] for devid in range(ndevs)]
+        bblocks, bdevs = [], []
+        if train:
+            bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+            bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+        # full shard 2
+        fblocks.insert(1, Block(0, span=1, memory=0, btype=FW))
+        fdevs.insert(1, list(range(ndevs)))
+        if train:
+            bblocks.insert(ndevs-1, Block(0, span=1, memory=0, btype=BW))
+            bdevs.insert(ndevs-1, list(range(ndevs)))
+        # full shard 1
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
+        fdevs.insert(0, list(range(ndevs)))
+        if train:
+            bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
+            bdevs.insert(len(bblocks), list(range(ndevs)))
+    
+        blocks = fblocks + bblocks
+        devs = fdevs + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
     
     @staticmethod
     def interlace_mlm(ndevs: int) -> SchedPlan:
@@ -280,7 +315,7 @@ if __name__ == '__main__':
         print(f'schedule-{idx}:\n{schedule}')
         print(f'Unrolled schedule:\n{schedule.unroll(nmicros + 2)}')
 
-    # schedule.save('./xshape.tsched.4stages.json')
+    schedule.save('./nnshape.tsched.4stages.eager.json')
 
     if args.save is not None:
         now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
