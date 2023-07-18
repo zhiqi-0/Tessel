@@ -40,7 +40,7 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera', 'nnshape_eager'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -73,7 +73,7 @@ def stage_tp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]) -> IRS
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
         elif fnode.name in ('self_attention', 'feedforward'):
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
-        elif fnode.name == 'corss_attention':
+        elif fnode.name == 'cross_attention':
             tp(graph, fnode, devs, idx=2, dim=0, num=ndevs)
         elif fnode.name == 'linear':  # the last embedding linear
             tp(graph, fnode, devs, idx=1, dim=0, num=ndevs)
@@ -309,7 +309,86 @@ def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
     blocks = fblocks + bblocks
     devs = fdevs + bdevs
     sched.add_block_seq(blocks, devs)
+    return sched
 
+
+def premise_nnshape_eager(graph: IRGraph, ndevs: int, mem_limit: int):
+    """NNShape schedule"""
+    transformers = annotate_structure(graph)
+    if args.recompute:
+        for transformer in transformers:
+            graph.recompute(transformer)
+
+    nlayers = len(transformers)
+    # get embedding layers
+    embed2 = transformers.pop(nlayers // 2)
+    embed1 = transformers.pop(0)
+    # pipeline 
+    encoders = transformers[:len(transformers) // 2]
+    decoders = transformers[len(transformers) // 2:]
+
+    estimator = Estimator(args.db_cache)
+    tps = partial(TPS, recompute=args.recompute, estimator=estimator, mem_limit=mem_limit)
+    print(f'> search [initialize]: profiling model...')
+    latency, memory  = estimator(tuple(graph.select(ntype=IRFwOperation)), train=True)
+    print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
+    # save profiled database
+    print(f'> search [dump]: saving profiled database...')
+    estimator.save()
+    
+    # policy search for balanced pipeline stages
+    min_cost, config = layer_division(
+        list(itertools.chain(*(encoders+decoders))), ndevs, tps, args.mbs,
+        max_d=1, max_t=ndevs//4, max_p=4
+    )
+    fstages = [embed1] + [config[0][0]] + [embed2] + \
+              [snodes for snodes, _, _ in config[1:]]
+    # re-schedule nodes
+    graph.order(embed2, config[1][0][0:2])
+    graph.staging(tuple(stage[0] for stage in fstages))
+    segments = graph.select(ntype=IRSegment, flatten=False)
+    fsegments = [seg for seg in segments if seg.isfw()]
+
+    # full tensor parallelism on embedding layers
+    embed_tp_devs = list(range(ndevs))
+    stage_tp(graph, fsegments[0].select(ntype=IRFwOperation), embed_tp_devs)
+    stage_tp(graph, fsegments[2].select(ntype=IRFwOperation), embed_tp_devs)
+
+    curr_devs = 0
+    # sub tensor parallelism on pipeline stages
+    xcoders = fsegments[1:2] + fsegments[3:]
+    for segment, (_, dp, tp) in zip(xcoders, config):
+        stage_ndevs = dp * tp
+        if stage_ndevs > 1:
+            stage_tp(graph, segment.select(ntype=IRFwOperation),
+                     list(range(curr_devs, curr_devs + stage_ndevs)))
+        else:
+            graph.assign(segment, curr_devs)
+        curr_devs += stage_ndevs
+    assert curr_devs == ndevs
+
+    FW, BW = 'forward', 'backward'
+    sched = TSched(ndevs)
+    # v-shape
+    fblocks = [TBlock(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+    fdevs = [[devid] for devid in range(ndevs)]
+    bblocks, bdevs = [], []
+    bblocks = [TBlock(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
+    bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
+    # full shard 2
+    fblocks.insert(1, TBlock(0, span=1, memory=0, btype=FW))
+    fdevs.insert(1, list(range(ndevs)))
+    bblocks.insert(ndevs-1, TBlock(0, span=1, memory=0, btype=BW))
+    bdevs.insert(ndevs-1, list(range(ndevs)))
+    # full shard 1
+    fblocks.insert(0, TBlock(0, span=1, memory=0, btype=FW))
+    fdevs.insert(0, list(range(ndevs)))
+    bblocks.insert(len(bblocks), TBlock(0, span=1, memory=0, btype=BW))
+    bdevs.insert(len(bblocks), list(range(ndevs)))
+
+    blocks = fblocks + bblocks
+    devs = fdevs + bdevs
+    sched.add_block_seq(blocks, devs)
     return sched
 
 
@@ -325,9 +404,17 @@ def train():
         runtime_policy = PASChimera
         args.mbs = 2 * args.mbs # double for chimera execution
     else:
+        if args.premise == 'nnshape':
+            premise = premise_nnshape
+            assert 'eager' not in args.load_tsched
+        elif args.premise == 'nnshape_eager':
+            premise = premise_nnshape_eager
+            assert 'eager' in args.load_tsched
+        else:
+            assert False
         runtime_policy = partial(tsched,
                                  num_microbatches = args.gbs//args.mbs,
-                                 premise=premise_nnshape,
+                                 premise=premise,
                                  max_inflight_blks = [10] * DeviceGroup().world_size,
                                  load_plan=args.load_tsched,
                                  save_dir=args.save)
