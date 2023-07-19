@@ -326,7 +326,7 @@ def train():
         nparams = 0
         for param in model.parameters():
             nparams += param.nelement()
-        print('full model parameter: {nparams}')
+        print(f'full model parameter: {nparams}')
 
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 
