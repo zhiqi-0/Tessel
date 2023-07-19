@@ -64,7 +64,7 @@ if SearchFlag.mem_limit is not None:
 
 # ========================= parallelisms =================================
 
-def stage_tp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]) -> IRSegment:
+def stage_tp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]):
     """Tensor parallelsim a stage"""
     ndevs = len(devs)
     for fnode in nodes:
@@ -80,6 +80,20 @@ def stage_tp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]) -> IRS
         else:
             replica(graph, fnode, devs)
 
+
+def stage_dp(graph: IRGraph, nodes: List[IRFwOperation], devs: List[int]):
+    """data parallelism a stage"""
+    assert args.mbs % len(devs) == 0
+    ndevs = len(devs)
+    for fnode in nodes:
+        if fnode.name == 'multiref' or isinstance(fnode, IRGraphAnchor): continue
+        try:
+            dim = fnode.input(0).shape.index(args.mbs)
+            tp(graph, fnode, devs, idx=0, dim=dim, num=ndevs)
+        except:
+            warnings.warn(f'fail to partition node: {fnode.name} using data parallelism',
+                          category=RuntimeWarning, stacklevel=0)
+            replica(graph, fnode, devs)
 
 def full_tp(graph: IRGraph, resource):
 
@@ -360,8 +374,12 @@ def premise_nnshape_eager(graph: IRGraph, ndevs: int, mem_limit: int):
     for segment, (_, dp, tp) in zip(xcoders, config):
         stage_ndevs = dp * tp
         if stage_ndevs > 1:
-            stage_tp(graph, segment.select(ntype=IRFwOperation),
-                     list(range(curr_devs, curr_devs + stage_ndevs)))
+            if args.mbs % (ndevs // 4) == 0:
+                stage_dp(graph, segment.select(ntype=IRFwOperation),
+                         list(range(curr_devs, curr_devs + stage_ndevs)))
+            else:
+                stage_tp(graph, segment.select(ntype=IRFwOperation),
+                         list(range(curr_devs, curr_devs + stage_ndevs)))
         else:
             graph.assign(segment, curr_devs)
         curr_devs += stage_ndevs
@@ -439,6 +457,12 @@ def train():
         model = None
     dataloader = mT5DataLoader(args.mbs, cfg)
 
+    if torch.distributed.get_rank() == 0:
+        nparams = 0
+        for param in model.parameters():
+            nparams += param.nelement()
+        print(f'full model parameter: {nparams}')
+
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 
                   comm_cost_fn=lambda x: 1)
@@ -458,7 +482,7 @@ def train():
     nparams = 0
     for param in model.parameters():
         nparams += param.nelement()
-    print_each_rank(f'model parameter: {nparams}')
+    print_each_rank(f'loaded model parameter: {nparams}')
 
     CudaTimer(enable=False).warmup()
     iter_num, warmup = 3, 2
