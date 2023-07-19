@@ -11,12 +11,12 @@ GPU=V100
 
 # model arch
 LAYERS=40
-HIDDEN=5120
-HEADS=32
+HIDDEN=8192
+HEADS=64
 VOCAB_K=1536
 
 NGPUS=8
-NNODES=2
+NNODES=4
 HOSTNAME=worker-0
 # HOSTNAME=GCRSANDBOX109
 # NODE_RANK=0
@@ -26,24 +26,22 @@ VOCAB=`expr ${VOCAB_K} \* 1000`
 set -ex
 
 # PREMISE=tp
-# PREMISE=1f1b
+PREMISE=1f1b
 # PREMISE=gpipe
 # PREMISE=chimera
-PREMISE=nnshape
+# PREMISE=nnshape_eager
 
-if [ $PREMISE == "nnshape" ]; then
+if [ $PREMISE == "nnshape_eager" ] || [ $PREMISE == 'nnshape' ]; then
     echo "enabling async communication"
     export DISABLE_INTER_RVD=1
     export ASYNC_COMM=1
+    # export LOG_SCHEDULE=1
 fi
 
 if [ $PREMISE == "gpipe" ] || [ $PREMISE == '1f1b' ] || [ $PREMISE == 'chimera' ]; then
     echo "setting param limit"
-    export PARAM_LIMIT=18
+    export PARAM_LIMIT=28
 fi
-
-# export MEM_LIMIT=16
-
 
 TOTAL_GPUS=`expr ${NGPUS} \* ${NNODES}`
 TIME=`date "+%m-%d-%H-%M"`
@@ -55,13 +53,13 @@ if [ "$NNODES" -gt "1" ]; then
         examples/mt5/train.py \
             --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
             --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
-            --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.tsched.4stages.json \
+            --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.eager.tsched.4stages.json \
         2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
 else
     torchrun --nproc_per_node=$NGPUS \
         examples/mt5/train.py \
             --fp16 --mbs 1 --gbs 64 --premise $PREMISE --recompute \
             --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
-            --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.tsched.4stages.json \
+            --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.eager.tsched.4stages.json \
         2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
 fi

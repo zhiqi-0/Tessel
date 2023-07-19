@@ -296,7 +296,7 @@ def train():
         runtime_policy = partial(PASPredefined, sched='gpipe')
     elif args.premise == 'chimera':
         runtime_policy = PASChimera
-        args.mbs = 2 if args.mbs == 1 else args.mbs # double for chimera execution
+        args.mbs = args.mbs * 2 # double for chimera execution
     elif args.premise == 'tp':
         runtime_policy = full_tp
     else:
@@ -321,6 +321,12 @@ def train():
     else:
         model = None
     dataloader = GPTDataLoader(args.mbs, cfg)
+
+    if torch.distributed.get_rank() == 0:
+        nparams = 0
+        for param in model.parameters():
+            nparams += param.nelement()
+        print('full model parameter: {nparams}')
 
     model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 

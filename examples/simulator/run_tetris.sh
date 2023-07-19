@@ -8,6 +8,7 @@ mkdir -p $LOGS
 set -ex
 
 premise="vshape kshape mshape nnshape xshape"
+premise="nnshape_eager"
 
 
 # VShape
@@ -37,15 +38,28 @@ if echo $premise | grep -qw 'xshape'; then
 fi
 
 # NNShape
-if echo $premise | grep -qw 'nnshape'; then
+# if echo $premise | grep -qw 'nnshape'; then
+# 
+#     python examples/simulator/cases_tetris.py \
+#         --premise nnshape --ndevs 4 --nmicros 6 --inflight 6 \
+#     2>&1 | tee ${LOGS}/tetris.nnshape.train.log
+# 
+#     python examples/simulator/cases_tetris.py \
+#         --premise nnshape --ndevs 4 --nmicros 6 --inflight 4 --infer \
+#     2>&1 | tee ${LOGS}/tetris.nnshape.infer.log
+# 
+# fi
+
+# NNShape-eager
+if echo $premise | grep -qw 'nnshape_eager'; then
 
     python examples/simulator/cases_tetris.py \
-        --premise nnshape --ndevs 4 --nmicros 6 --inflight 6 \
-    2>&1 | tee ${LOGS}/tetris.nnshape.train.log
+        --premise nnshape_eager --ndevs 4 --nmicros 6 --inflight 6 \
+    2>&1 | tee ${LOGS}/tetris.nnshape_eager.train.log
 
-    python examples/simulator/cases_tetris.py \
-        --premise nnshape --ndevs 4 --nmicros 6 --inflight 4 --infer \
-    2>&1 | tee ${LOGS}/tetris.nnshape.infer.log
+    # python examples/simulator/cases_tetris.py \
+    #     --premise nnshape --ndevs 4 --nmicros 6 --inflight 4 --infer \
+    # 2>&1 | tee ${LOGS}/tetris.nnshape.infer.log
 
 fi
 
