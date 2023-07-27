@@ -1,5 +1,5 @@
 
-from typing import List, Callable
+from typing import List
 import torch
 from functools import partial
 import warnings
@@ -9,7 +9,6 @@ from examples.gpt.model import Config, GPT, GPTDataLoader
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
-from cube.graph.schedule.predefined import PredefinedSched
 
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
@@ -20,7 +19,7 @@ from cube.runtime.device import DeviceGroup
 
 from tetris.runtime.utils import tp, replica, annotate_structure
 from tetris.runtime.division import TPS, layer_division
-from tetris.runtime.sched import tsched
+from tetris.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PASTetris
 from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
@@ -39,7 +38,7 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'mshape', 'gpipe', 'tp', 'chimera'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'mshape', 'gpipe', 'tp', 'chimera', '1f1b+'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -102,8 +101,8 @@ def full_tp(graph: IRGraph, resource):
 
 # ========================= parallelisms =================================
 
-def PASPredefined(graph: IRGraph, resource, sched: str):
-    """VShape policy"""
+def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
+    """V-Shape placement"""
     transformers = annotate_structure(graph)
     if args.recompute:
         for transformer in transformers:
@@ -113,7 +112,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    mem_limit = mem_limit if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
     estimator = Estimator(args.db_cache)
@@ -127,9 +126,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     estimator.save()
 
     min_cost, best_config = layer_division(
-        nodes, resource.ngpus, tps, mbs, max_t=resource.ngpus-1)
-
-    # ======================= instantiate plan ====================
+        nodes, ndevs, tps, mbs, max_t=ndevs-1)
 
     fstages = [stage_nodes for stage_nodes, dp, tp in best_config]
     graph.staging([snodes[0] for snodes in fstages])
@@ -138,7 +135,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
     assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
-    devices = list(range(resource.ngpus))
+    devices = list(range(ndevs))
     for sid, segment in enumerate(fsegments):
         _, dp, tp = best_config[sid]
         stage_devices, devices = devices[:dp*tp], devices[dp*tp:]
@@ -151,20 +148,11 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
         else: assert False
 
     assert len(devices) == 0, f'not all devices are used (remaining {len(devices)})'
-
     replica(graph, dl, fsegments[0].device)
 
-    if sched == 'vshape':
-        PredefinedSched.sched_1f1b(graph, args.gbs // args.mbs, len(fsegments))
-    elif sched == 'gpipe':
-        PredefinedSched.sched_gpipe(graph, args.gbs // args.mbs, len(fsegments))
-    else:
-        raise RuntimeError
-    return graph
 
-
-def PASChimera(graph: IRGraph, resource):
-    """Chimera Direct policy"""
+def premise_xshape(graph: IRGraph, ndevs: int, mem_limit: int):
+    """X-Shape placement for Chimera Direct policy"""
     transformers = annotate_structure(graph)
     if args.recompute:
         for transformer in transformers:
@@ -174,13 +162,13 @@ def PASChimera(graph: IRGraph, resource):
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    mem_limit = mem_limit if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
     # for chimera, we constrain the tensor parallelism size of each pipeline to be same
     # due to its special scheduling polies.
-    assert resource.ngpus % 4 == 0
-    tp_size = resource.ngpus // 4
+    assert ndevs % 4 == 0
+    tp_size = ndevs // 4
     mem_limit = mem_limit * tp_size
 
     estimator = Estimator(args.db_cache)
@@ -225,8 +213,6 @@ def PASChimera(graph: IRGraph, resource):
             stage_tp(graph, [mb2], mb2_devs)
 
     replica(graph, dl, fsegments[0].device)
-    PredefinedSched.sched_chimera_direct(graph, args.gbs // args.mbs, len(fsegments))
-    return graph
 
 
 def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
@@ -267,6 +253,9 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
         else:
             graph.assign(segment, curr_devs)
         curr_devs += stage_ndevs
+    
+    dl = graph.select(ntype=IRDataOperation)[0]
+    replica(graph, dl, tp_devs)
 
     FW, BW = 'forward', 'backward'
     ndevs = len(fsegments) - 1
@@ -291,21 +280,35 @@ def premise_mshape(graph: IRGraph, ndevs: int, mem_limit: int):
 def train():
 
     if args.premise == '1f1b':
-        runtime_policy = partial(PASPredefined, sched='vshape')
+        runtime_policy = partial(PAS1F1B,
+                                 premise=premise_vshape,
+                                 nmicros=args.gbs//args.mbs,
+                                 sched='1f1b')
     elif args.premise == 'gpipe':
-        runtime_policy = partial(PASPredefined, sched='gpipe')
-    elif args.premise == 'chimera':
-        runtime_policy = PASChimera
-        args.mbs = args.mbs * 2 # double for chimera execution
-    elif args.premise == 'tp':
-        runtime_policy = full_tp
-    else:
-        runtime_policy = partial(tsched,
-                                 num_microbatches = args.gbs//args.mbs,
+        runtime_policy = partial(PAS1F1B,
+                                 premise=premise_vshape,
+                                 nmicros=args.gbs//args.mbs,
+                                 sched='gpipe')
+    elif args.premise == '1f1b+':
+        runtime_policy = partial(PAS1F1BPlus,
                                  premise=premise_mshape,
+                                 nmicros=args.gbs//args.mbs)
+    elif args.premise == 'chimera':
+        args.mbs = args.mbs * 2 # double for chimera execution
+        runtime_policy = partial(PAS1F1BPlus,
+                                 premise=premise_xshape,
+                                 nmicros=args.gbs//args.mbs)
+    elif args.premise == 'mshape':
+        runtime_policy = partial(PASTetris,
+                                 premise=premise_mshape,
+                                 nmicros=args.gbs//args.mbs,
                                  max_inflight_blks = [10] * DeviceGroup().world_size,
                                  load_plan=args.load_tsched,
                                  save_dir=args.save)
+    elif args.premise == 'tp':
+        runtime_policy = full_tp
+    else:
+        raise KeyError
 
     # setup model arg
     cfg = Config(

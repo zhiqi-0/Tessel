@@ -1,5 +1,5 @@
 
-from typing import List, Callable
+from typing import List
 import torch
 from functools import partial
 import warnings
@@ -10,7 +10,6 @@ from examples.mt5.model import Config, mT5, mT5DataLoader
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
-from cube.graph.schedule.predefined import PredefinedSched
 
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
@@ -21,7 +20,7 @@ from cube.graph.function.dimops import IRDimops
 
 from tetris.runtime.utils import tp, replica, annotate_structure
 from tetris.runtime.division import TPS, layer_division
-from tetris.runtime.sched import tsched
+from tetris.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PASTetris
 from tetris.runtime.estimator import Estimator
 from tetris.schedplan import SchedPlan as TSched
 from tetris.schedplan import Block as TBlock
@@ -40,7 +39,8 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera', 'nnshape_eager'],
+parser.add_argument('--premise', type=str,
+                    choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera', 'nnshape_eager', '1f1b+'],
                     help='premise shape')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
@@ -110,7 +110,7 @@ def full_tp(graph: IRGraph, resource):
 
 # ========================= parallelisms =================================
 
-def PASPredefined(graph: IRGraph, resource, sched: str):
+def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """VShape policy"""
     transformers = annotate_structure(graph)
     if args.recompute:
@@ -121,7 +121,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    mem_limit = mem_limit if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
     estimator = Estimator(args.db_cache)
@@ -135,7 +135,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     estimator.save()
 
     min_cost, best_config = layer_division(
-        nodes, resource.ngpus, tps, mbs, max_t=resource.ngpus-1, max_d=1)
+        nodes, ndevs, tps, mbs, max_t=ndevs-1, max_d=1)
 
     # ======================= instantiate plan ====================
 
@@ -146,7 +146,7 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
     fsegments: List[IRSegment] = [seg for seg in segments if seg.isfw()]
     assert len(fsegments) == len(best_config), f"Expected {len(best_config)} stages in plan, but got {len(fsegments)}"
 
-    devices = list(range(resource.ngpus))
+    devices = list(range(ndevs))
     for sid, segment in enumerate(fsegments):
         _, dp, tp = best_config[sid]
         stage_devices, devices = devices[:dp*tp], devices[dp*tp:]
@@ -160,18 +160,10 @@ def PASPredefined(graph: IRGraph, resource, sched: str):
 
     assert len(devices) == 0, f'not all devices are used (remaining {len(devices)})'
 
-    replica(graph, dl, list(range(resource.ngpus)))
-
-    if sched == 'vshape':
-        PredefinedSched.sched_1f1b(graph, args.gbs // args.mbs, len(fsegments))
-    elif sched == 'gpipe':
-        PredefinedSched.sched_gpipe(graph, args.gbs // args.mbs, len(fsegments))
-    else:
-        raise RuntimeError
-    return graph
+    replica(graph, dl, list(range(ndevs)))
 
 
-def PASChimera(graph: IRGraph, resource):
+def premise_xshape(graph: IRGraph, ndevs: int, mem_limit: int):
     """Chimera Direct policy"""
     transformers = annotate_structure(graph)
     if args.recompute:
@@ -182,13 +174,13 @@ def PASChimera(graph: IRGraph, resource):
     dl: IRDataOperation = graph.select(ntype=IRDataOperation)[0]
     mbs: int = dl.output(0).shape[dl.get_batch_dims()[0]]
 
-    mem_limit = resource.gpus[0].memory if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
+    mem_limit = mem_limit if SearchFlag.mem_limit is None else SearchFlag.mem_limit * 1024 * 1024 * 1024
     print(f'> search [constraints]: device limitied memory: {mem_limit}')
 
     # for chimera, we constrain the tensor parallelism size of each pipeline to be same
     # due to its special scheduling polies.
-    assert resource.ngpus % 4 == 0
-    tp_size = resource.ngpus // 4
+    assert ndevs % 4 == 0
+    tp_size = ndevs // 4
     mem_limit = mem_limit * tp_size
 
     estimator = Estimator(args.db_cache)
@@ -234,8 +226,6 @@ def PASChimera(graph: IRGraph, resource):
             stage_tp(graph, [mb2], mb2_devs)
     print(f'> micro batch number: {args.gbs // args.mbs}')
     replica(graph, dl, graph.device)
-    PredefinedSched.sched_chimera_direct(graph, args.gbs // args.mbs, len(fsegments))
-    return graph
 
 
 def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
@@ -300,6 +290,9 @@ def premise_nnshape(graph: IRGraph, ndevs: int, mem_limit: int):
             graph.assign(segment, curr_devs)
         curr_devs += stage_ndevs
     assert curr_devs == ndevs
+
+    dl = graph.select(ntype=IRDataOperation)[0]
+    replica(graph, dl, embed_tp_devs)
 
     FW, BW = 'forward', 'backward'
     sched = TSched(ndevs)
@@ -385,6 +378,9 @@ def premise_nnshape_eager(graph: IRGraph, ndevs: int, mem_limit: int):
         curr_devs += stage_ndevs
     assert curr_devs == ndevs
 
+    dl = graph.select(ntype=IRDataOperation)[0]
+    replica(graph, dl, embed_tp_devs)
+
     FW, BW = 'forward', 'backward'
     sched = TSched(ndevs)
     # v-shape
@@ -413,29 +409,44 @@ def premise_nnshape_eager(graph: IRGraph, ndevs: int, mem_limit: int):
 def train():
 
     if args.premise == '1f1b':
-        runtime_policy = partial(PASPredefined, sched='vshape')
+        runtime_policy = partial(PAS1F1B,
+                                 premise=premise_vshape,
+                                 nmicros=args.gbs//args.mbs,
+                                 sched='1f1b')
     elif args.premise == 'gpipe':
-        runtime_policy = partial(PASPredefined, sched='gpipe')
-    elif args.premise == 'tp':
-        runtime_policy = full_tp
+        runtime_policy = partial(PAS1F1B,
+                                 premise=premise_vshape,
+                                 nmicros=args.gbs//args.mbs,
+                                 sched='gpipe')
+    elif args.premise == '1f1b+':
+        runtime_policy = partial(PAS1F1BPlus,
+                                 premise=premise_nnshape_eager,
+                                 nmicros=args.gbs//args.mbs)
     elif args.premise == 'chimera':
-        runtime_policy = PASChimera
         args.mbs = 2 * args.mbs # double for chimera execution
-    else:
-        if args.premise == 'nnshape':
-            premise = premise_nnshape
-            assert 'eager' not in args.load_tsched
-        elif args.premise == 'nnshape_eager':
-            premise = premise_nnshape_eager
-            assert 'eager' in args.load_tsched
-        else:
-            assert False
-        runtime_policy = partial(tsched,
-                                 num_microbatches = args.gbs//args.mbs,
-                                 premise=premise,
+        runtime_policy = partial(PASChimera,
+                                 premise=premise_xshape,
+                                 nmicros=args.gbs//args.mbs)
+    elif args.premise == 'nnshape':
+        runtime_policy = partial(PASTetris,
+                                 premise=premise_nnshape,
+                                 nmicros=args.gbs//args.mbs,
                                  max_inflight_blks = [10] * DeviceGroup().world_size,
                                  load_plan=args.load_tsched,
                                  save_dir=args.save)
+        assert 'eager' not in args.load_tsched
+    elif args.premise == 'nnshape_eager':
+        runtime_policy = partial(PASTetris,
+                                 premise=premise_nnshape_eager,
+                                 nmicros=args.gbs//args.mbs,
+                                 max_inflight_blks = [10] * DeviceGroup().world_size,
+                                 load_plan=args.load_tsched,
+                                 save_dir=args.save)
+        assert 'eager' in args.load_tsched
+    elif args.premise == 'tp':
+        runtime_policy = full_tp
+    else:
+        raise KeyError
 
     # setup model arg
     cfg = Config(
@@ -472,7 +483,6 @@ def train():
         loss.backward()
         # return loss
     model: torch.nn.Module = model.get_gen_module()
-
 
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999))
 
