@@ -42,6 +42,10 @@ parser.add_argument('--vocab', type=int, required=True)
 parser.add_argument('--premise', type=str,
                     choices=['1f1b', 'nnshape', 'gpipe', 'tp', 'chimera', 'nnshape_eager', '1f1b+'],
                     help='premise shape')
+parser.add_argument('--max-pp', type=int, default=32,
+                    help='max number of pipeline stages')
+parser.add_argument('--max-tp', type=int, default=32,
+                    help='max size of tensor paralllelism')
 parser.add_argument('--recompute', action='store_true', default=False)
 # log save
 parser.add_argument('--save', type=str, default=None,
@@ -135,7 +139,10 @@ def premise_vshape(graph: IRGraph, ndevs: int, mem_limit: int):
     estimator.save()
 
     min_cost, best_config = layer_division(
-        nodes, ndevs, tps, mbs, max_t=ndevs-1, max_d=1)
+        nodes, ndevs, tps, mbs,
+        max_t=min(ndevs-1, args.max_tp),
+        max_d=1,
+        max_p=args.max_pp)
 
     # ======================= instantiate plan ====================
 
