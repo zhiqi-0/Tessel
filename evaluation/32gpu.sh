@@ -22,7 +22,7 @@ mkdir -p $LOGS
 LAYERS=80
 HEADS=64
 HIDDEN=8192
-VOCAB_K=1024
+VOCAB_K=1536
 VOCAB=`expr ${VOCAB_K} \* 1000`
 
 set -ex
@@ -71,16 +71,17 @@ torchrun --nproc_per_node=$NGPUS --nnodes=$NNODES \
 LOGS=${LOG_DIR}/mt5
 mkdir -p $LOGS
 
-LAYERS=32
-HEADS=48
-HIDDEN=6144
-VOCAB_K=1024
+LAYERS=40
+HEADS=64
+HIDDEN=8192
+VOCAB_K=1536
 VOCAB=`expr ${VOCAB_K} \* 1000`
 
 
 # mT5 - 1f1b
 PREMISE=1f1b
 
+PARAM_LIMIT=28 \
 torchrun --nproc_per_node=$NGPUS --nnodes=$NNODES \
     --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
     examples/mt5/train.py \
@@ -101,17 +102,7 @@ torchrun --nproc_per_node=$NGPUS --nnodes=$NNODES \
         --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.eager.tsched.4stages.json \
     2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.rank${NODE_RANK}.log
 
-# mT5 - chimera
-PREMISE=chimera
-
-PARAM_LIMIT=29 \
-torchrun --nproc_per_node=$NGPUS --nnodes=$NNODES \
-    --node_rank=$NODE_RANK --master_addr=$HOSTNAME \
-    examples/mt5/train.py \
-        --fp16 --mbs 1 --gbs $GBS --premise $PREMISE --recompute \
-        --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
-        --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.eager.tsched.4stages.json \
-    2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.rank${NODE_RANK}.log
+# mT5 - chimera (OOM)
 
 # mT5 - nnshape-eager
 PREMISE=nnshape_eager
