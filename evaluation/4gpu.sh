@@ -1,5 +1,7 @@
 #!/bin/bash
 
+LOG_DIR=logs
+
 GPU=V100
 NGPUS=4
 TOTAL_GPUS=4
@@ -8,11 +10,11 @@ echo $CUDA_VISIBLE_DEVICES
 export PYTHONPATH=.:$PYTHONPATH
 export OMP_NUM_THREADS=4
 
-GBS=64 # global batch size
+GBS=128 # global batch size
 
 
 # ================================= GPT =============================
-LOGS=logs/gpt
+LOGS=${LOG_DIR}/gpt
 mkdir -p $LOGS
 
 LAYERS=32
@@ -26,7 +28,7 @@ set -ex
 # GPT - 1f1b
 PREMISE=1f1b
 
-PARAM_LIMIT=22 \
+PARAM_LIMIT=21 \
 torchrun --nproc_per_node=$NGPUS \
     examples/gpt/train.py \
         --fp16 --mbs 1 --gbs $GBS --premise $PREMISE --recompute \
@@ -60,7 +62,7 @@ torchrun --nproc_per_node=$NGPUS \
 
 
 # ================================= mT5 =============================
-LOGS=logs/mt5
+LOGS=${LOG_DIR}/mt5
 mkdir -p $LOGS
 
 LAYERS=24
