@@ -140,8 +140,7 @@ class SolverBase:
         self._mem = peak_mem_per_dev
 
     def mono_mid_constraints(self):
-        """Same subgraph should be executed in order of growing micro-batch index        
-        """
+        """Same subgraph should be executed in order of growing micro-batch index"""
         gid_blocks: Dict[int, List[Block]] = {}
         for block in self._blocks:
             assert block.gid is not None
@@ -189,6 +188,15 @@ class SolverBase:
             sys.stdout.flush()
         self._solved = True
         return opt if self._solution is not None else None
+
+    def satisfy(self, var, upper: int) -> bool:
+        """Check whether the solution exists"""
+        self._solution = None
+        self._solver.push()
+        self._solver.add(var <= upper)
+        ret = (self._solver.check() == z3.sat)
+        self._solver.pop()
+        return ret
     
     def solutions(self, var: z3.ArithRef, val: int) -> Iterable[SchedPlan]:
         """
@@ -244,6 +252,18 @@ class StepOptimalSolver(SolverBase):
             else sum(blk.span for blk in self._blocks) + 1
         self._opt = super().solve(self._nsteps, upper, 0, silence)
         return self._opt
+
+    def satisfy(self, memory: List[int]) -> bool:
+        """Check whether the schedule plan exists"""
+        self._solution = None
+        self._solver.push()
+        self.mono_mid_constraints()
+        self.add_memory_constraints(memory)
+        self.init_nsteps()
+        upper = sum(blk.span for blk in self._blocks)
+        ret = super().satisfy(self._nsteps, upper)
+        self._solver.pop()
+        return ret
 
     def solutions(self):
         return super().solutions(self._nsteps, self._opt) if self._opt is not None else []
