@@ -1,11 +1,13 @@
 import sys
-import time
 import argparse
 import os
+import math
 
 from tetris.schedplan import SchedPlan, Block
 from tetris.composer import Composer
 from tetris.draw import Painter
+
+from tetris.timer import CpuTimer
 
 
 FW='forward'
@@ -86,16 +88,16 @@ class Premise:
             bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
             bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
         # full shard 2
-        fblocks.insert(ndevs // 2, Block(0, span=1, memory=0, btype=FW))
+        fblocks.insert(ndevs // 2, Block(0, span=1, memory=1, btype=FW))
         fdevs.insert(ndevs // 2, list(range(ndevs)))
         if train:
-            bblocks.insert(ndevs // 2, Block(0, span=1, memory=0, btype=BW))
+            bblocks.insert(ndevs // 2, Block(0, span=1, memory=-1, btype=BW))
             bdevs.insert(ndevs // 2, list(range(ndevs)))
         # full shard 1
-        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
         if train:
-            bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
+            bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
             bdevs.insert(len(bblocks), list(range(ndevs)))
     
         blocks = fblocks + bblocks
@@ -186,10 +188,10 @@ class Premise:
         else:
             bblocks, bdevs = [], []
         # fully shard
-        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
+        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
         if train:
-            bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
+            bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
             bdevs.insert(len(bblocks), list(range(ndevs)))
     
         blocks = fblocks + bblocks
@@ -272,7 +274,7 @@ if __name__ == '__main__':
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
                         help='number of micro-batches')
-    parser.add_argument('--inflight', type=int,
+    parser.add_argument('--memory', type=int,
                         help='memory limits')
     parser.add_argument('--save', type=str, default=None,
                         help='save searched schedule under a folder')
@@ -289,45 +291,48 @@ if __name__ == '__main__':
     for gid, blk in enumerate(micro.chain_blocks()):
         blk.gid = gid
 
-    nmicros = min(args.nmicros, args.inflight)
-    print(f'Premise: {args.ndevs} devices, {nmicros} micro-batches')
+    # calculate max inflight micro-batches
+    ndevs = micro.ndevs
+    peak_mem = [0] * ndevs
+    for blk in micro.all_blocks():
+        if blk.memory > 0:
+            for devid in micro.device(blk):
+                peak_mem[devid] += blk.memory
+    max_inflight_nmb = int(math.ceil(args.memory / max(peak_mem)))
+
+    print(f'Premise: {args.ndevs} devices, composing {max_inflight_nmb} micro-batches')
     print(micro)
 
-    micros = [micro.copy(mid) for mid in range(nmicros)]
     # for inference, we don't consider memory
     if args.infer:
-        for micro in micros:
-            for block in micro.all_blocks():
-                block.memory = 0
+        for block in micro.all_blocks():
+            block.memory = 0
 
-    memory = [args.inflight] * args.ndevs
+    CpuTimer(enable=True).start('search e2e')
+    schedule = Composer.compose_n(micro, args.memory, max_inflight_nmb)
+    CpuTimer().stop('search e2e')
 
-    tic = time.time()
-    schedules = Composer.compose(micros, memory)
-    toc = time.time()
+    print('\n' + '=' * 48)
+    CpuTimer().print_all(times=1)
 
-    print('\n================================================')
-    print('search time: {:.2f} seconds'.format(toc-tic))
-
-    if len(schedules) == 0:
+    if schedule is None:
         print(f'no solution')
-    for idx, schedule in enumerate(schedules):
-        print(f'schedule-{idx}:\n{schedule}')
-        print(f'Unrolled schedule:\n{schedule.unroll(nmicros + 2)}')
+    else:
+        print(f'best schedule:\n{schedule}')
+        print(f'Unrolled schedule:\n{schedule.unroll(max_inflight_nmb + 2)}')
 
-    schedule.save('./nnshape.tsched.4stages.eager.json')
-
-    if args.save is not None:
-        now = time.strftime("%Y-%m-%d-%H-%M", time.gmtime())
+    if args.save is not None and schedule is not None:
         Painter.visualize(
-            micros[0],
-            os.path.join(args.save, f"{args.premise}-premise.{now}.png"))
-        repetends = [sched.extract(sched.repetend[0], sched.repetend[1]) for sched in schedules]
-        for idx, (schedule, repetend) in enumerate(zip(schedules, repetends)):
-            schedule.save(os.path.join(args.save, f"{args.premise}-schedule-{idx}.{now}.json"))
-            Painter.visualize(
-                schedule,
-                os.path.join(args.save, f"{args.premise}-schedule-{idx}.{now}.png"))
-            Painter.visualize(
-                repetends[idx], 
-                os.path.join(args.save, f"{args.premise}-repetend-{idx}.{now}.png"))
+            micro,
+            os.path.join(args.save, f"{args.premise}-micro.png")
+        )
+        repetend = schedule.extract(schedule.repetend[0], schedule.repetend[1])
+        schedule.save(os.path.join(args.save, f"{args.premise}-schedule.json"))
+        Painter.visualize(
+            schedule,
+            os.path.join(args.save, f"{args.premise}-schedule.png")
+        )
+        Painter.visualize(
+            repetend, 
+            os.path.join(args.save, f"{args.premise}-repetend.png")
+        )

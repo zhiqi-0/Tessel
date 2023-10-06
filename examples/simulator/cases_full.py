@@ -1,6 +1,6 @@
 """
 PYTHONPATH=.:$PYTHONPATH python examples/cases.py \
-    --premise vshape --ndevs 4 --nmicros 4 --inflight 4
+    --premise vshape --ndevs 4 --nmicros 4 --memory 4
 """
 from typing import List
 import sys
@@ -241,7 +241,7 @@ if __name__ == '__main__':
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
                         help='number of micro-batches')
-    parser.add_argument('--inflight', type=int,
+    parser.add_argument('--memory', type=int,
                         help='memory limits')
     parser.add_argument('--infer', action='store_true', default=False,
                     help='search for inference schedule')
@@ -257,7 +257,7 @@ if __name__ == '__main__':
         blk.gid = gid
 
     micros = [micro.copy(mid) for mid in range(args.nmicros)]
-    memory = [args.inflight] * args.ndevs
+    memory = [args.memory] * args.ndevs
 
     print(f'Premise: {args.ndevs} devices, {args.nmicros} micro-batches')
     print(micros[0], flush=True)

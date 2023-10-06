@@ -13,7 +13,7 @@ premise=(vshape xshape kshape mshape nnshape)
 for m in ${nmicros[@]}; do
     for p in ${premise[@]}; do
         python examples/simulator/cases_full.py \
-            --premise $p --ndevs 4 --nmicros $m --inflight 10 \
+            --premise $p --ndevs 4 --nmicros $m --memory 16 \
         2>&1 | tee ${LOGS}/naive.$p.nmicros$m.train.log
     done
 done
@@ -21,7 +21,7 @@ done
 for m in ${nmicros[@]}; do
     for p in ${premise[@]}; do
         python examples/simulator/cases_full.py \
-            --premise $p --ndevs 4 --nmicros $m --inflight 10 --infer \
+            --premise $p --ndevs 4 --nmicros $m --memory 16 --infer \
         2>&1 | tee ${LOGS}/naive.$p.nmicros$m.infer.log
     done
 done
