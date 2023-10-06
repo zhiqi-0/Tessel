@@ -1,5 +1,5 @@
 from typing import List, Tuple, Optional
-from functools import partial
+import math
 from tetris.schedplan import SchedPlan, Block
 
 from tetris.repetend import MicroPicker
@@ -10,10 +10,32 @@ from tetris.timer import CpuTimer
 class Composer:
 
     @staticmethod
-    def compose(micros: List[SchedPlan], memory: List[int]) -> List[SchedPlan]:
-        assert len(micros) > 0
-        assert all(micro.ndevs == micros[0].ndevs for micro in micros)
-        ndevs = micros[0].ndevs
+    def compose(micro: SchedPlan, memory: int) -> SchedPlan:
+        ndevs = micro.ndevs
+        peak_mem = [0] * ndevs
+        for blk in micro.all_blocks():
+            if blk.memory > 0:
+                for devid in micro.device(blk):
+                    peak_mem[devid] += blk.memory
+        max_inflight_nmb = int(math.ceil(memory / max(peak_mem)))
+        # search for the 
+        best_sched, best_nbubbles = None, None
+        for nr in range(1, max_inflight_nmb + 1):
+            schedule, nbubbles = Composer.compose_n(micro, memory, nr)
+            if schedule is None: continue
+            if best_nbubbles is None or nbubbles < best_nbubbles:
+                best_sched = schedule
+                best_nbubbles = nbubbles
+            if nbubbles == 0:
+                break
+        return best_sched
+
+    @staticmethod
+    def compose_n(micro: SchedPlan, memory: int, nmicros: int) -> Optional[SchedPlan]:
+        """Search the best schedule for using the number of microbatches"""
+        ndevs = micro.ndevs
+        memory = [memory] * ndevs
+        micros = [micro.copy(mid) for mid in range(nmicros)]
 
         schedule_parts = [None, None, None]  # warmup / repetend / cooldown
         nbubbles = micros[0].nsteps + 1
@@ -64,7 +86,7 @@ class Composer:
 
         repetend = schedule_parts[1]
         if repetend is None:  # no solution
-            return []
+            return None
 
         # search for warmup parts
         print(f'> constructing warmup and cooldown parts...')
@@ -86,7 +108,7 @@ class Composer:
         schedule = SchedPlan.concat([warmup, repetend, cooldown])
         schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
 
-        return [schedule]
+        return schedule
 
     @staticmethod
     def construct(blocks: List[Block], devices: List[Tuple[int]],
