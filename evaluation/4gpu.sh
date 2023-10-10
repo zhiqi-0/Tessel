@@ -25,6 +25,17 @@ VOCAB=`expr ${VOCAB_K} \* 1000`
 
 set -ex
 
+# GPT - tp
+PREMISE=tp
+
+PARAM_LIMIT=21 \
+torchrun --nproc_per_node=$NGPUS \
+    examples/gpt/train.py \
+        --fp16 --mbs 1 --gbs $GBS --premise $PREMISE --recompute \
+        --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 2048 --vocab $VOCAB \
+        --db-cache gpt_${GPU}_db.json --load-tsched gpt.mshape.tsched.json \
+    2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
+
 # GPT - 1f1b
 PREMISE=1f1b
 
@@ -70,6 +81,17 @@ HEADS=16
 HIDDEN=1024
 VOCAB_K=1024
 VOCAB=`expr ${VOCAB_K} \* 1000`
+
+# mT5 - tp
+PREMISE=tp
+
+torchrun --nproc_per_node=$NGPUS \
+        examples/mt5/train.py \
+            --fp16 --mbs 4 --gbs $GBS --premise $PREMISE --recompute \
+            --layers $LAYERS --hidden $HIDDEN --heads $HEADS --seqlen 1024 --vocab $VOCAB \
+            --db-cache mt5_${GPU}_db.json --load-tsched mt5.nnshape.eager.tsched.4stages.json \
+        2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
+
 
 
 # mT5 - 1f1b
