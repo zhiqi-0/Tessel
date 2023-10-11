@@ -1,5 +1,4 @@
 from typing import Union, Tuple, List, Set
-import sys
 import os
 
 from cube.ir.cten import IRTensor
@@ -7,7 +6,7 @@ from cube.ir.operator import IRFwOperation
 from cube.graph.segment import IRSegment
 from cube.graph.function import IRGraphAnchor
 from cube.graph.function.dimops import IRDimops, DimAnno
-from tetris.runtime.profiler import ProfileDataBase
+from .profiler import ProfileDataBase
 
 
 def get_partition_space(node: IRDimops) -> List[Tuple[int, int]]:

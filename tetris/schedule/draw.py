@@ -5,7 +5,7 @@ python -m tetris.draw --planfile plan.json --outfile plan.png
 """
 
 from typing import Tuple, Optional
-from tetris.schedplan import SchedPlan, Block
+from tetris.schedule.schedplan import SchedPlan, Block
 
 import numpy as np
 

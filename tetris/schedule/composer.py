@@ -1,11 +1,11 @@
 from typing import List, Tuple, Optional
 import math
-from tetris.schedplan import SchedPlan, Block
 
-from tetris.repetend import MicroPicker
-from tetris.solver import StepOptimalSolver, BubbleOptimalSolver, SolverBase
+from .schedplan import SchedPlan, Block
+from .repetend import MicroPicker
+from .solver import StepOptimalSolver, BubbleOptimalSolver, SolverBase
 
-from tetris.timer import CpuTimer
+from tetris.utils.timer import CpuTimer
 
 class Composer:
 

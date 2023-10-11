@@ -8,7 +8,7 @@ from typing import List, Optional, Set, Dict, Iterable, Tuple
 import sys
 import more_itertools
 
-from tetris.schedplan import SchedPlan, Block
+from tetris.schedule.schedplan import SchedPlan, Block
 
 import z3
 
