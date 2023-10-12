@@ -67,7 +67,7 @@ class SpmdSolver:
         min_latency = None
 
         # grid search
-        for dp in range(min_dp, min(len(devices) + 1, max_dp + 1)):
+        for dp in range(min_dp, min(len(devices), max_dp) + 1):
             # constraints: only search for gpu# of power of 2
             if not is_of_power2(dp): continue
             # get tp size

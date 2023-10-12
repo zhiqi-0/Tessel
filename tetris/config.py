@@ -14,6 +14,8 @@ class TetrisConfig:
     max_tp_size: Optional[int] = None
     # maximal number of pipeline parallelism size
     max_pp_size: Optional[int] = None
+    # minimal number of pipeline parallelism size
+    min_pp_size: Optional[int] = 1
     # maximal number of graph chunks
     max_layer_num: int = 12
     # maximal parameter limit (GB) at first stage
@@ -44,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      add_help=False)
     parser.add_argument('--max-pp', type=int, default=32,
                         help='max number of pipeline stages')
+    parser.add_argument('--min-pp', type=int, default=1,
+                        help='min size of pipeline parallelism')
     parser.add_argument('--max-tp', type=int, default=32,
                         help='max size of tensor paralllelism')
     parser.add_argument('--max-dp', type=int, default=None,
@@ -76,6 +80,7 @@ def build_config(parser: argparse.ArgumentParser) -> TetrisConfig:
         max_dp_size=args.max_dp,
         max_tp_size=args.max_tp,
         max_pp_size=args.max_pp,
+        min_pp_size=args.min_pp,
         max_layer_num=args.max_layer_num,
         param_limit_gb=args.param_limit,
         memory_fraction=args.mem_frac,

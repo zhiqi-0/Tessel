@@ -52,7 +52,8 @@ def staged_spmd(blocks: List[IRBlock],
     stage_solver = StageSolver(spmd_solver,
                                config.max_dp_size,
                                config.max_tp_size,
-                               config.max_pp_size)
+                               config.max_pp_size,
+                               config.min_pp_size)
     parallel_spec: ParallelSpec = stage_solver.solve(blocks, num_devices, mem_limit)
     assert parallel_spec is not None, f"no solution"
     return parallel_spec

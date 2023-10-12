@@ -40,12 +40,15 @@ class StageSolver:
     def __init__(self, spmd_solver: SpmdSolver,
                  max_d: int,
                  max_t: Optional[int] = None,
-                 max_p: Optional[int] = None):
+                 max_p: Optional[int] = None,
+                 min_p: int = 1):
 
         self.spmd_solver = spmd_solver
         self.max_d = max_d
         self.max_t: Optional[int] = max_t
         self.max_p: Optional[int] = max_p
+        assert min_p > 0
+        self.min_p: int = min_p
 
         # search caches: (nodes, ndevs, nstages) -> ParallelSpec
         self._cache: Dict[Tuple[Blocks, int, int], Optional[StageSpec]] = dict()
@@ -86,7 +89,7 @@ class StageSolver:
         _logger.info(f'constructing dp tables of {len(nodes)} blocks)...')
         min_cost, best_spec = None, None
         devices = tuple(range(ndevs))
-        for nstages in range(1, self.max_p+1):
+        for nstages in range(self.min_p, self.max_p+1):
             spec = self._DP(nodes,
                             devices,
                             nstages,
