@@ -58,14 +58,24 @@ class Composer:
             
             # step 2: validate warmup
             CpuTimer().start('warmup')
-            exist = Composer.satisfy(warmup_blks, warmup_devs, ndevs, memory) 
+            if case_nbubbles == 0:
+                warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, memory,
+                                               optimizer=StepOptimalSolver)
+                exist = (warmup is not None)
+            else:
+                exist = Composer.satisfy(warmup_blks, warmup_devs, ndevs, memory) 
             CpuTimer().stop('warmup')
             if not exist: continue
             
             # step 3: validate cooldown
             cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
             CpuTimer().start('cooldown')
-            exist = Composer.satisfy(cooldown_blks, cooldown_devs, ndevs, cooldown_pre_mem)
+            if case_nbubbles == 0:
+                cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, ndevs, cooldown_pre_mem,
+                                         optimizer=StepOptimalSolver)
+                exist = (cooldown is not None)
+            else:
+                exist = Composer.satisfy(cooldown_blks, cooldown_devs, ndevs, cooldown_pre_mem)
             CpuTimer().stop('cooldown')
             if not exist: continue
             
@@ -74,9 +84,9 @@ class Composer:
             assert case_nbubbles < nbubbles
             nbubbles = case_nbubbles
             schedule_parts = [
-                (warmup_blks, warmup_devs, memory),
+                warmup if nbubbles == 0 else (warmup_blks, warmup_devs, memory),
                 repetend,
-                (cooldown_blks, cooldown_devs, cooldown_pre_mem)
+                cooldown if nbubbles == 0 else (cooldown_blks, cooldown_devs, cooldown_pre_mem),
             ]
 
             if case_nbubbles == 0:
@@ -89,21 +99,24 @@ class Composer:
             return None
 
         # search for warmup parts
-        print(f'> constructing warmup and cooldown parts...')
-        CpuTimer().start('warmup')
-        warmup_blks, warmup_devs, warmup_mem = schedule_parts[0]
-        warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_mem,
-                                       optimizer=StepOptimalSolver)
-        CpuTimer().stop('warmup')
-        assert warmup is not None
+        if nbubbles == 0:
+            warmup, repetend, cooldown = schedule_parts
+        else:
+            print(f'> constructing warmup and cooldown parts...')
+            CpuTimer().start('warmup')
+            warmup_blks, warmup_devs, warmup_mem = schedule_parts[0]
+            warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_mem,
+                                           optimizer=StepOptimalSolver)
+            CpuTimer().stop('warmup')
+            assert warmup is not None
 
-        # search for cooldown parts
-        CpuTimer().start('cooldown')
-        cooldown_blks, cooldown_devs, cooldown_mem = schedule_parts[2]
-        cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, ndevs, cooldown_mem,
-                                         optimizer=StepOptimalSolver)
-        CpuTimer().stop('cooldown')
-        assert cooldown is not None
+            # search for cooldown parts
+            CpuTimer().start('cooldown')
+            cooldown_blks, cooldown_devs, cooldown_mem = schedule_parts[2]
+            cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, ndevs, cooldown_mem,
+                                             optimizer=StepOptimalSolver)
+            CpuTimer().stop('cooldown')
+            assert cooldown is not None
 
         schedule = SchedPlan.concat([warmup, repetend, cooldown])
         schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
