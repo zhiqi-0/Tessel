@@ -3,11 +3,10 @@ import argparse
 import os
 import math
 
-from tetris.schedplan import SchedPlan, Block
-from tetris.composer import Composer
-from tetris.draw import Painter
-
-from tetris.timer import CpuTimer
+from tetris.schedule.schedplan import SchedPlan, Block
+from tetris.schedule.composer import Composer
+from tetris.schedule.draw import Painter
+from tetris.utils.timer import CpuTimer
 
 
 FW='forward'
@@ -88,16 +87,16 @@ class Premise:
             bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
             bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
         # full shard 2
-        fblocks.insert(ndevs // 2, Block(0, span=1, memory=1, btype=FW))
+        fblocks.insert(ndevs // 2, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(ndevs // 2, list(range(ndevs)))
         if train:
-            bblocks.insert(ndevs // 2, Block(0, span=1, memory=-1, btype=BW))
+            bblocks.insert(ndevs // 2, Block(0, span=1, memory=0, btype=BW))
             bdevs.insert(ndevs // 2, list(range(ndevs)))
         # full shard 1
-        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
         if train:
-            bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
+            bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
             bdevs.insert(len(bblocks), list(range(ndevs)))
     
         blocks = fblocks + bblocks
@@ -188,10 +187,10 @@ class Premise:
         else:
             bblocks, bdevs = [], []
         # fully shard
-        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
         if train:
-            bblocks.insert(len(bblocks), Block(0, span=1, memory=-1, btype=BW))
+            bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
             bdevs.insert(len(bblocks), list(range(ndevs)))
     
         blocks = fblocks + bblocks

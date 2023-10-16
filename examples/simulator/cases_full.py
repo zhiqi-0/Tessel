@@ -7,9 +7,9 @@ import sys
 import time
 import argparse
 
-from tetris.schedplan import SchedPlan, Block
-from tetris.solver import StepOptimalSolver
-from tetris.composer import Composer
+from tetris.schedule.schedplan import SchedPlan, Block
+from tetris.schedule.solver import StepOptimalSolver
+from tetris.schedule.composer import Composer
 
 
 FW='forward'
