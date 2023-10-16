@@ -2,7 +2,7 @@
 
 export PYTHONPATH=.:$PYTHONPATH
 
-LOGS=logs/simulator
+LOGS=logs/simulator1013-lazy
 mkdir -p $LOGS
 
 set -x
@@ -39,8 +39,9 @@ fi
 # NNShape
 if echo $premise | grep -qw 'nnshape'; then
 
+    # all block memory 1 and -1: --memory 36
     python examples/simulator/cases_tetris.py \
-        --premise nnshape --ndevs 4 --nmicros 6 --memory 16 \
+        --premise nnshape --ndevs 4 --nmicros 6 --memory 6 \
     2>&1 | tee ${LOGS}/tetris.nnshape.train.log
 
     python examples/simulator/cases_tetris.py \
@@ -65,8 +66,9 @@ fi
 # MShape
 if echo $premise | grep -qw 'mshape'; then
 
+    # all block memory 1 and -1: --memory 15
     python examples/simulator/cases_tetris.py \
-        --premise mshape --ndevs 4 --nmicros 6 --memory 11 \
+        --premise mshape --ndevs 4 --nmicros 6 --memory 6 \
     2>&1 | tee ${LOGS}/tetris.mshape.train.log
 
     python examples/simulator/cases_tetris.py \
