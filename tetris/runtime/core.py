@@ -43,7 +43,7 @@ def staged_spmd(blocks: List[IRBlock],
     fnodes = []
     for block in blocks:
         fnodes += list(block.nodes)
-    latency, memory  = estimator(fnodes, train=True)
+    latency, memory  = estimator(fnodes)
     print(f'> search [estimation]: single device latency: {latency} ms, memory: {memory/1024/1024/1024} GB')
     # save profiled database
     print(f'> search [dump]: saving profiled database...')

@@ -80,12 +80,15 @@ def PAS1F1B(graph: IRGraph,
     
     assert all(len(seg.device) < resource.ngpus for seg in fsegments)
 
-    if sched == '1f1b':
-        PredefinedSched.sched_1f1b(graph, nmicros, len(fsegments))
-    elif sched == 'gpipe':
-        PredefinedSched.sched_gpipe(graph, nmicros, len(fsegments))
+    if not graph.train:
+        PredefinedSched.sched_infer_pipe(graph, nmicros, len(fsegments))
     else:
-        raise RuntimeError
+        if sched == '1f1b':
+            PredefinedSched.sched_1f1b(graph, nmicros, len(fsegments))
+        elif sched == 'gpipe':
+            PredefinedSched.sched_gpipe(graph, nmicros, len(fsegments))
+        else:
+            raise RuntimeError
     return graph
 
 
