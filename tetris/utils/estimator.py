@@ -55,9 +55,10 @@ class Estimator:
         reload = cache if os.path.exists(cache) else None
         self.database = ProfileDataBase(reload)
 
-    def profile(self, node: IRFwOperation, train: bool) -> Tuple[float, int]:
+    def profile(self, node: IRFwOperation) -> Tuple[float, int]:
         if node.name == 'multiref' or isinstance(node, IRGraphAnchor):
             return 0.0, 0, 0.0, 0
+        train = True if node.mirror is not None else False
         trials = [None,] + get_partition_space(node)
         trials = Estimator.special_rules(node, trials)
         for config in trials:
@@ -78,23 +79,27 @@ class Estimator:
         return infer_span, infer_mem, train_span, train_mem
 
 
-    def __call__(self, nodes_or_segment: Union[Tuple[IRFwOperation], IRSegment], 
-                 train: bool = False):
-        """
-        Profile the computation cost of a subgraph
+    def __call__(self, nodes_or_segment: Union[Tuple[IRFwOperation], IRSegment]):
+        """Profile the computation cost of a subgraph
 
-        @param nodes_or_segment Tuple[IRFwOperation] | IRSegment
+        Args:
+            nodes_or_segment (Tuple[IRFwOperation] | IRSegment):
 
-        @return latency float: latency in ms
-        @return memory int: memory in bytes
+        Returns:
+            float: latency in ms
+            int: memory in bytes
         """
+        if isinstance(nodes_or_segment, IRSegment):
+            train = nodes_or_segment.mirror is not None
+        else:
+            train = any(n.mirror is not None for n in nodes_or_segment)
         nodes = nodes_or_segment.nodes() if isinstance(nodes_or_segment, IRSegment) else nodes_or_segment
         memory, latency = 0.0, 0.0
         for node in nodes:
             if self.database.exist(node):
                 infer_span, infer_mem, train_span, train_mem = self.database.query(node)
             else:
-                infer_span, infer_mem, train_span, train_mem = self.profile(node, train)
+                infer_span, infer_mem, train_span, train_mem = self.profile(node)
             if train:
                 memory += train_mem
                 latency += train_span
