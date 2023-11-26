@@ -8,7 +8,7 @@ with open("requirements.txt") as f:
 
 setuptools.setup(
   name=             'tessel',
-  version=          '2.0',
+  version=          '0.3',
   author=           'Zhiqi Lin',
   author_email=     'zhiqi.0@outlook.com',
   description=      'Schedule plan searching for composing micro-batch executions',
