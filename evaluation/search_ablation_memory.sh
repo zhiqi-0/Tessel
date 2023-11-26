@@ -25,8 +25,8 @@ nmicros=6
 
 for p in ${premise[@]}; do
     for m in ${memory[@]}; do
-        python examples/simulator/cases_tetris.py \
+        python examples/simulator/cases_tessel.py \
             --premise $p --ndevs 4 --nmicros $nmicros --memory $m \
-        2>&1 | tee ${LOGS}/abalation.tetris.$p.mem$m.log
+        2>&1 | tee ${LOGS}/abalation.tessel.$p.mem$m.log
     done
 done

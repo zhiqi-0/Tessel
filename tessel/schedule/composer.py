@@ -5,7 +5,7 @@ from .schedplan import SchedPlan, Block
 from .repetend import MicroPicker
 from .solver import StepOptimalSolver, BubbleOptimalSolver, SolverBase
 
-from tetris.utils.timer import CpuTimer
+from tessel.utils.timer import CpuTimer
 
 class Composer:
 

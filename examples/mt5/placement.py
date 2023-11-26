@@ -9,11 +9,11 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.graph.function.dimops import IRDimops
 from cube.ir.operator import IRFwOperation
 
-from tetris.runtime.utils import tensor_parallelism, replica
-from tetris.config import TetrisConfig
-from tetris.runtime.core import staged_spmd, instantiate
-from tetris.placement.block import blocking
-from tetris.placement.stage import ParallelSpec
+from tessel.runtime.utils import tensor_parallelism, replica
+from tessel.config import tesselConfig
+from tessel.runtime.core import staged_spmd, instantiate
+from tessel.placement.block import blocking
+from tessel.placement.stage import ParallelSpec
 
 
 def tp_func(graph, fnode, devices: Tuple[int]):
@@ -34,7 +34,7 @@ def vshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: TetrisConfig):
+           config: tesselConfig):
     
     fnodes = graph.select(ntype=IRFwOperation)
     blocks = blocking(fnodes, config.max_layer_num)
@@ -55,7 +55,7 @@ def xshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: TetrisConfig):
+           config: tesselConfig):
 
     assert ngpus % 4 == 0
     tp_size = ngpus // 4
@@ -100,7 +100,7 @@ def nnshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: TetrisConfig) -> IRGraph:
+           config: tesselConfig) -> IRGraph:
 
     fnodes = graph.select(ntype=IRFwOperation)
     layers = list(mitr.split_before(fnodes, lambda n : isinstance(n, IRGraphAnchor)))

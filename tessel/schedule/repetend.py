@@ -2,7 +2,7 @@
 from typing import List, Tuple, Dict
 import itertools
 import math
-from tetris.schedule.schedplan import SchedPlan, Block
+from tessel.schedule.schedplan import SchedPlan, Block
 
 
 Devices = Tuple[int]

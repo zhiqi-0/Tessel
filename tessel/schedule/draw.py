@@ -1,11 +1,11 @@
 """
 Example usage:
 
-python -m tetris.draw --planfile plan.json --outfile plan.png
+python -m tessel.draw --planfile plan.json --outfile plan.png
 """
 
 from typing import Tuple, Optional
-from tetris.schedule.schedplan import SchedPlan, Block
+from tessel.schedule.schedplan import SchedPlan, Block
 
 import numpy as np
 
@@ -23,7 +23,7 @@ class Painter:
         """
         Visualize a schedule plan
 
-        @param schedplan SchedPlan: Tetris schedule plan
+        @param schedplan SchedPlan: Tessel schedule plan
         @param outfile Optional[str]: output filename. If None, will show in window
         """
         plt.close('all')

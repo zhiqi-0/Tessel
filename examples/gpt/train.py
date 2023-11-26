@@ -10,8 +10,8 @@ from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PASTetris, PASFullTP
-from tetris.config import build_config, build_parser
+from tessel.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PAStessel, PASFullTP
+from tessel.config import build_config, build_parser
 
 import argparse
 
@@ -26,13 +26,13 @@ parser.add_argument('--heads', type=int, required=True)
 parser.add_argument('--seqlen', type=int, required=True)
 parser.add_argument('--vocab', type=int, required=True)
 # policy
-parser.add_argument('--premise', type=str, choices=['1f1b', 'tetris', 'gpipe', 'tp', 'chimera', '1f1b+'],
+parser.add_argument('--premise', type=str, choices=['1f1b', 'tessel', 'gpipe', 'tp', 'chimera', '1f1b+'],
                     help='premise shape')
 # log save
 parser.add_argument('--save', type=str, default=None,
                     help='folder for save searched results.')
 parser.add_argument('--load-tsched', type=str, default=None,
-                    help='load searched tetris schedule from file')
+                    help='load searched tessel schedule from file')
 args = parser.parse_args()
 
 cube.init()
@@ -71,8 +71,8 @@ def train():
                                  nmicros=args.gbs//args.mbs,
                                  premise=xshape,
                                  config=config)
-    elif args.premise == 'tetris':
-        runtime_policy = partial(PASTetris,
+    elif args.premise == 'tessel':
+        runtime_policy = partial(PAStessel,
                                  mbs=args.mbs,
                                  nmicros=args.gbs//args.mbs,
                                  premise=mshape,

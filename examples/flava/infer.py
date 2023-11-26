@@ -10,15 +10,15 @@ from functools import partial
 import torch
 
 from examples.flava.model import FLAVAModel, Config, ImageTextDataLoader
-from examples.flava.placement import vshape, kshape, tp_func, PASTetris
+from examples.flava.placement import vshape, kshape, tp_func, PAStessel
 
 import cube
 from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.policy import PAS1F1B, PASFullTP
-from tetris.config import build_config, build_parser
+from tessel.runtime.policy import PAS1F1B, PASFullTP
+from tessel.config import build_config, build_parser
 
 import argparse
 
@@ -33,11 +33,11 @@ parser.add_argument('--heads', type=int, required=True)
 
 # policy
 parser.add_argument('--premise', type=str,
-                    choices=['1f1b', 'tetris', 'tp'],
+                    choices=['1f1b', 'tessel', 'tp'],
                     help='premise shape')
 # log save
 parser.add_argument('--load-tsched', type=str, default=None,
-                    help='load searched tetris schedule from file')
+                    help='load searched tessel schedule from file')
 args = parser.parse_args()
 
 cube.init()
@@ -56,8 +56,8 @@ def inference():
                                  premise=vshape,
                                  config=config,
                                  sched='1f1b')
-    elif args.premise == 'tetris':
-        runtime_policy = partial(PASTetris,
+    elif args.premise == 'tessel':
+        runtime_policy = partial(PAStessel,
                                  mbs=args.mbs,
                                  nmicros=args.gbs//args.mbs,
                                  premise=kshape,

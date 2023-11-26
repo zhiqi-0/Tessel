@@ -23,14 +23,14 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.ir.operator import IRDataOperation, IRFwOperation
 from cube.runtime.device import DeviceGroup
 
-from tetris.runtime.utils import tp, replica, annotate_structure, MemoryProfiler
-from tetris.runtime.division import TPS, layer_division
-from tetris.runtime.sched import tsched
-from tetris.runtime.estimator import Estimator
-from tetris.schedplan import SchedPlan as TSched
-from tetris.schedplan import Block as TBlock
-from tetris.runtime.piper import Piper
-from tetris.runtime.flags import SearchFlag
+from tessel.runtime.utils import tp, replica, annotate_structure, MemoryProfiler
+from tessel.runtime.division import TPS, layer_division
+from tessel.runtime.sched import tsched
+from tessel.runtime.estimator import Estimator
+from tessel.schedplan import SchedPlan as TSched
+from tessel.schedplan import Block as TBlock
+from tessel.runtime.piper import Piper
+from tessel.runtime.flags import SearchFlag
 
 import argparse
 
@@ -59,7 +59,7 @@ parser.add_argument('--recompute', action='store_true', default=False,
 parser.add_argument('--save', type=str, default=None, 
                     help='folder for save searched results.')
 parser.add_argument('--load-tsched', type=str, default=None,
-                    help='load searched tetris schedule from file')
+                    help='load searched tessel schedule from file')
 parser.add_argument('--db-cache', type=str, default='db.json',
                     help='profiled database save file')
 args = parser.parse_args()

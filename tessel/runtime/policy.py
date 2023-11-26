@@ -8,11 +8,11 @@ from cube.graph.graph import IRGraph, IRSegment
 from cube.graph.function import IRGraphAnchor
 from cube.graph.schedule.schedplan import SchedulePlan as CSched
 
-from tetris.schedule.schedplan import SchedPlan as TSched
-from tetris.schedule.schedplan import Block as TBlock
-from tetris.runtime.utils import replica
+from tessel.schedule.schedplan import SchedPlan as TSched
+from tessel.schedule.schedplan import Block as TBlock
+from tessel.runtime.utils import replica
 
-from tetris.config import TetrisConfig
+from tessel.config import TesselConfig
 
 
 def _recompute(graph: IRGraph):
@@ -28,9 +28,9 @@ def PASFullTP(graph: IRGraph,
               mbs: int,
               nmicros: int,
               tp_func: Callable,
-              config: TetrisConfig) -> IRGraph:
+              config: TesselConfig) -> IRGraph:
     
-    config = TetrisConfig() if config is None else config
+    config = TesselConfig() if config is None else config
 
     if config.recompute:
         _recompute(graph)
@@ -53,10 +53,10 @@ def PAS1F1B(graph: IRGraph,
             mbs: int,
             nmicros: int,
             premise: Callable,
-            config: TetrisConfig,
+            config: TesselConfig,
             sched = '1f1b') -> IRGraph:
 
-    config = TetrisConfig() if config is None else config
+    config = TesselConfig() if config is None else config
     config.max_dp_size = mbs if config.max_dp_size is None \
         else min(mbs, config.max_dp_size)
     
@@ -97,9 +97,9 @@ def PAS1F1BPlus(graph: IRGraph,
                 mbs: int,
                 nmicros: int,
                 premise: Callable,
-                config: TetrisConfig,) -> IRGraph:
+                config: TesselConfig,) -> IRGraph:
     
-    config = TetrisConfig() if config is None else config
+    config = TesselConfig() if config is None else config
     config.max_dp_size = mbs if config.max_dp_size is None \
         else min(mbs, config.max_dp_size)
 
@@ -130,9 +130,9 @@ def PASChimera(graph: IRGraph,
                mbs: int,
                nmicros: int,
                premise: Callable,
-               config: TetrisConfig,) -> IRGraph:
+               config: TesselConfig,) -> IRGraph:
     """Chimera Direct policy"""
-    config = TetrisConfig() if config is None else config
+    config = TesselConfig() if config is None else config
     config.max_dp_size = mbs if config.max_dp_size is None \
         else min(mbs, config.max_dp_size)
 
@@ -183,11 +183,11 @@ def _create_tblocks(graph: IRGraph):
 
 def _schedule(graph: IRGraph, tsched: Union[str, TSched], nmicros: int, blk2seg: Dict[TBlock, IRSegment]) -> CSched:
     """
-    Translate a searched schedplan of Tetris into Cube SchedulePlan runtime
+    Translate a searched schedplan of Tessel into Cube SchedulePlan runtime
 
     Args:
         graph (IRGraph): staged IRGraph
-        schedplan (Union[TSched, str]): Tetris SchedPlan instance or file (saved in json format)
+        schedplan (Union[TSched, str]): Tessel SchedPlan instance or file (saved in json format)
     
     Returns:
         CSched: cube schedule plan
@@ -204,14 +204,14 @@ def _schedule(graph: IRGraph, tsched: Union[str, TSched], nmicros: int, blk2seg:
     return csched
 
 
-def PASTetris(graph: IRGraph,
+def PASTessel(graph: IRGraph,
               resource,
               mbs: int,
               nmicros: int,
               premise: Callable,
-              config: TetrisConfig,
+              config: TesselConfig,
               load_sched: str) -> IRGraph:
-    """policy entry for tetris.
+    """policy entry for tessel.
 
     Args:
         graph (IRGraph)
@@ -224,7 +224,7 @@ def PASTetris(graph: IRGraph,
     Returns:
         IRGraph
     """
-    config = TetrisConfig() if config is None else config
+    config = TesselConfig() if config is None else config
     config.max_dp_size = mbs if config.max_dp_size is None \
         else min(mbs, config.max_dp_size)
 

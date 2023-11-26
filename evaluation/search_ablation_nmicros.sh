@@ -13,8 +13,8 @@ premise=(vshape xshape kshape mshape nnshape)
 
 for m in ${nmicros[@]}; do
     for p in ${premise[@]}; do
-        python examples/simulator/cases_tetris.py \
+        python examples/simulator/cases_tessel.py \
             --premise $p --ndevs 4 --nmicros $m --memory 16 \
-        2>&1 | tee ${LOGS}/abalation.tetris.$p.nmicros$m.log
+        2>&1 | tee ${LOGS}/abalation.tessel.$p.nmicros$m.log
     done
 done

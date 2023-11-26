@@ -1,12 +1,10 @@
 import sys
 import argparse
-import os
 import math
 
-from tetris.schedule.schedplan import SchedPlan, Block
-from tetris.schedule.composer import Composer
-from tetris.schedule.draw import Painter
-from tetris.utils.timer import CpuTimer
+from tessel.schedule.schedplan import SchedPlan, Block
+from tessel.schedule.composer import Composer
+from tessel.utils.timer import CpuTimer
 
 
 FW='forward'
@@ -140,28 +138,29 @@ class Premise:
         return sched
     
     @staticmethod
-    def interlace_mlm(ndevs: int) -> SchedPlan:
+    def mllm(ndevs: int, train: bool = True) -> SchedPlan:
         """
         f f       f b       b b
         f   f     f b     b   b
         f     f   f b   b     b
         f       f f b b       b
         """
+        assert train, f"Only support training mode for now"
         sched = SchedPlan(ndevs)
         # 
         fblocks = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
         fdevs = [[devid] for devid in range(ndevs)]
-        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+        bblocks = [Block(0, span=3, memory=-1, btype=BW) for _ in range(ndevs)]
         bdevs = [[ndevs-1-devid] for devid in range(ndevs)]
         #
-        fblocks.insert(len(fblocks), Block(0, span=1, memory=1, btype=FW))
+        fblocks.insert(len(fblocks), Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(len(fdevs), list(range(ndevs)))
-        bblocks.insert(0, Block(0, span=2, memory=-1, btype=BW))
+        bblocks.insert(0, Block(0, span=1, memory=0, btype=BW))
         bdevs.insert(0, list(range(ndevs)))
         #
-        fblocks.insert(0, Block(0, span=1, memory=1, btype=FW))
+        fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
-        bblocks.insert(len(bblocks), Block(0, span=2, memory=-1, btype=BW))
+        bblocks.insert(len(bblocks), Block(0, span=1, memory=0, btype=BW))
         bdevs.insert(len(bblocks), list(range(ndevs)))
 
         blocks = fblocks + bblocks
@@ -267,7 +266,7 @@ class Premise:
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='Tetris Cases')
+    parser = argparse.ArgumentParser(description='tessel Cases')
     parser.add_argument('--premise', type=str)
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
@@ -320,18 +319,24 @@ if __name__ == '__main__':
         print(f'best schedule:\n{schedule}')
         print(f'Unrolled schedule:\n{schedule.unroll(max_inflight_nmb + 2)}')
 
-    if args.save is not None and schedule is not None:
-        Painter.visualize(
-            micro,
-            os.path.join(args.save, f"{args.premise}-micro.png")
-        )
-        repetend = schedule.extract(schedule.repetend[0], schedule.repetend[1])
-        schedule.save(os.path.join(args.save, f"{args.premise}-schedule.json"))
-        Painter.visualize(
-            schedule,
-            os.path.join(args.save, f"{args.premise}-schedule.png")
-        )
-        Painter.visualize(
-            repetend, 
-            os.path.join(args.save, f"{args.premise}-repetend.png")
-        )
+    if args.save is not None:
+        schedule.save(args.save)
+
+    # from tessel.schedule.draw import Painter
+    # import os
+    # 
+    # if args.save is not None and schedule is not None:
+    #     Painter.visualize(
+    #         micro,
+    #         os.path.join(args.save, f"{args.premise}-micro.png")
+    #     )
+    #     repetend = schedule.extract(schedule.repetend[0], schedule.repetend[1])
+    #     schedule.save(os.path.join(args.save, f"{args.premise}-schedule.json"))
+    #     Painter.visualize(
+    #         schedule,
+    #         os.path.join(args.save, f"{args.premise}-schedule.png")
+    #     )
+    #     Painter.visualize(
+    #         repetend, 
+    #         os.path.join(args.save, f"{args.premise}-repetend.png")
+    #     )

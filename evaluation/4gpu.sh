@@ -58,7 +58,7 @@ torchrun --nproc_per_node=$NGPUS \
     2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
 
 # GPT - mshape
-PREMISE=tetris
+PREMISE=tessel
 
 ASYNC_COMM=1 DISABLE_INTER_RVD=1 \
 torchrun --nproc_per_node=$NGPUS \
@@ -125,7 +125,7 @@ torchrun --nproc_per_node=$NGPUS \
     2>&1 | tee ${LOGS}/${TOTAL_GPUS}gpus.$PREMISE.vocab${VOCAB_K}k.layer${LAYERS}.hidden${HIDDEN}.heads${HEADS}.log
 
 # mT5 - nnshape-eager
-PREMISE=tetris
+PREMISE=tessel
 
 ASYNC_COMM=1 DISABLE_INTER_RVD=1 \
 torchrun --nproc_per_node=$NGPUS \

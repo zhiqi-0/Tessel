@@ -11,17 +11,17 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
 
-from tetris.utils.estimator import Estimator
-from tetris.placement.stage import StageSolver, ParallelSpec
-from tetris.placement.spmd import SpmdSolver
-from tetris.placement.block import IRBlock
-from tetris.config import TetrisConfig
+from tessel.utils.estimator import Estimator
+from tessel.placement.stage import StageSolver, ParallelSpec
+from tessel.placement.spmd import SpmdSolver
+from tessel.placement.block import IRBlock
+from tessel.config import TesselConfig
 
 
 def staged_spmd(blocks: List[IRBlock],
                 num_devices: int,
                 mem_limit: int,
-                config: TetrisConfig):
+                config: TesselConfig):
     """Search for best placement
 
     Args:

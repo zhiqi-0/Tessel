@@ -4,7 +4,7 @@ import argparse
 
 
 @dataclass
-class TetrisConfig:
+class TesselConfig:
 
     # =============== staged spmd solver config ===============
 
@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     .. code-block:: python
 
-        tparser = tetris.build_parser()
+        tparser = tessel.build_parser()
         parser = argparser.ArgumentParser(parents=[tparser], ...)
         parser.add_argument(...)  # user arguments
 
@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: the parser
     ```
     """
-    parser = argparse.ArgumentParser(description='tetris policy searching configuration',
+    parser = argparse.ArgumentParser(description='tessel policy searching configuration',
                                      add_help=False)
     parser.add_argument('--max-pp', type=int, default=32,
                         help='max number of pipeline stages')
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_config(parser: argparse.ArgumentParser) -> TetrisConfig:
+def build_config(parser: argparse.ArgumentParser) -> TesselConfig:
     """
     Build the solver config from argument parser
 
@@ -73,10 +73,10 @@ def build_config(parser: argparse.ArgumentParser) -> TetrisConfig:
         parser (argparse.ArgumentParser): the argument parser
 
     Returns:
-        TetrisConfig: the solver config
+        TesselConfig: the solver config
     """
     args = parser.parse_args()
-    config = TetrisConfig(
+    config = TesselConfig(
         max_dp_size=args.max_dp,
         max_tp_size=args.max_tp,
         max_pp_size=args.max_pp,

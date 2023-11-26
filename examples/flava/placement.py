@@ -5,11 +5,11 @@ from cube.graph.segment import IRSegment
 from cube.graph.function.anchor import IRGraphAnchor
 from cube.ir.operator import IRFwOperation
 
-from tetris.runtime.utils import tensor_parallelism, replica
-from tetris.config import TetrisConfig
-from tetris.runtime.core import staged_spmd, instantiate
-from tetris.placement.block import blocking
-from tetris.placement.stage import ParallelSpec
+from tessel.runtime.utils import tensor_parallelism, replica
+from tessel.config import tesselConfig
+from tessel.runtime.core import staged_spmd, instantiate
+from tessel.placement.block import blocking
+from tessel.placement.stage import ParallelSpec
 
 
 def tp_func(graph, fnode, devices: Tuple[int]):
@@ -24,7 +24,7 @@ def vshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: TetrisConfig):
+           config: tesselConfig):
     
     fnodes = graph.select(ntype=IRFwOperation)
     blocks = blocking(fnodes, config.max_layer_num)
@@ -45,7 +45,7 @@ def kshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: TetrisConfig):
+           config: tesselConfig):
 
     nodes = tuple(graph.select(ntype=IRFwOperation))
     text_anchor = graph.select(name='text')[0]
@@ -90,14 +90,14 @@ def kshape(graph: IRGraph,
     return graph
 
 
-def PASTetris(graph: IRGraph,
+def PAStessel(graph: IRGraph,
               resource,
               mbs: int,
               nmicros: int,
               premise: Callable,
-              config: TetrisConfig,
+              config: tesselConfig,
               load_sched: str) -> IRGraph:
-    """policy entry for tetris.
+    """policy entry for tessel.
 
     Args:
         graph (IRGraph)
@@ -110,9 +110,9 @@ def PASTetris(graph: IRGraph,
     Returns:
         IRGraph
     """
-    from tetris.runtime.policy import (_recompute, IRDataOperation,
+    from tessel.runtime.policy import (_recompute, IRDataOperation,
         _create_tblocks, TBlock, _schedule, TSched)
-    config = TetrisConfig() if config is None else config
+    config = tesselConfig() if config is None else config
     config.max_dp_size = mbs if config.max_dp_size is None \
         else min(mbs, config.max_dp_size)
 
