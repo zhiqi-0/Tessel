@@ -24,7 +24,7 @@ User can firstly try out with an example like:
 
 ```bash
 python examples/simulator/cases_tessel.py \
-    --premise mshape --ndevs 4 \
+    --placement mshape --ndevs 4 \
     --nmicros 6 --memory 6 \
     --save mshape.4stages.sched.json
 ```
@@ -60,7 +60,7 @@ def vshape(ndevs: int) -> SchedPlan:
 placement = vshape(ndevs=4)  # 4-device v-shape placement
 ```
 
-The `sched.add_block_seq` will add blocks into a schedule plan (currently the micro-batch plan). `blocks` will be assigned by data dependency from the previous one to the later one. For more kinds of data dependency specification, please refer to interface of `Block.make_dependency`.
+The `sched.add_block_seq` will add blocks into a schedule plan (currently the micro-batch plan). `blocks` will be connected with data dependency from the prior one to the next one. To specify more flexible data dependencies among blocks, please refer to interface of `Block.make_dependency`.
 
 ### Step 2: Search for Schedules
 
