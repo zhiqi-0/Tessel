@@ -11,7 +11,7 @@ FW='forward'
 BW='backward'
 
 
-class Premise:
+class Placement:
 
     @staticmethod
     def vshape(ndevs: int, train: bool = True) -> SchedPlan:
@@ -240,7 +240,7 @@ class Premise:
         return sched
 
     @staticmethod
-    def finetune(ndevs: int) -> SchedPlan:
+    def finetune(ndevs: int, train: bool = True) -> SchedPlan:
         """
         f f             b
         f   f         b  
@@ -254,20 +254,53 @@ class Premise:
             
         fblocks.insert(0, Block(0, span=1, memory=0, btype=FW))
         fdevs.insert(0, list(range(ndevs)))
-            
-        bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
-        bdevs = [[devid] for devid in range(ndevs)][::-1]
-            
+        
+        if train:
+            bblocks = [Block(0, span=2, memory=-1, btype=BW) for _ in range(ndevs)]
+            bdevs = [[devid] for devid in range(ndevs)][::-1]
+        else:
+            bblocks, bdevs = [], []
+
         blocks = fblocks + bblocks
         devs = fdevs + bdevs
         sched.add_block_seq(blocks, devs)
         return sched
-    
+
+    @staticmethod
+    def alphafold(ndevs: int, train: bool = True) -> SchedPlan:
+        """
+        f   f   f       b
+         f   f   f     b
+          f   f   f   b
+           f   f   f b
+        """
+        sched = SchedPlan(ndevs)
+
+        fblocks_1 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs)]
+        fdevs_1 = [[devid] for devid in range(ndevs)]
+
+        fblocks_2 = [Block(0, span=1, memory=0, btype=FW) for _ in range(ndevs)]
+        fdevs_2 = [[devid] for devid in range(ndevs)]
+
+        fblocks_3 = [Block(0, span=1, memory=1, btype=FW) for _ in range(ndevs)]
+        fdevs_3 = [[devid] for devid in range(ndevs)]
+
+        if train:
+            bblocks = [Block(0, span=1, memory=-1, btype=BW) for _ in range(ndevs)]
+            bdevs = [[devid] for devid in range(ndevs)][::-1]
+        else:
+            bblocks, bdevs = [], []
+
+        blocks = fblocks_1 + fblocks_2 + fblocks_3 + bblocks
+        devs = fdevs_1 + fdevs_2 + fdevs_3 + bdevs
+        sched.add_block_seq(blocks, devs)
+        return sched
+
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='tessel Cases')
-    parser.add_argument('--premise', type=str)
+    parser = argparse.ArgumentParser(description='Tessel Cases')
+    parser.add_argument('--placement', type=str)
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
     parser.add_argument('--nmicros', type=int,
@@ -284,8 +317,8 @@ if __name__ == '__main__':
     print(args)
     sys.stdout.flush()
 
-    premise = getattr(Premise, args.premise)
-    micro: SchedPlan = premise(args.ndevs, train=not args.infer)
+    placement = getattr(Placement, args.placement)
+    micro: SchedPlan = placement(args.ndevs, train=not args.infer)
     for gid, blk in enumerate(micro.chain_blocks()):
         blk.gid = gid
 
@@ -298,7 +331,7 @@ if __name__ == '__main__':
                 peak_mem[devid] += blk.memory
     max_inflight_nmb = int(math.ceil(args.memory / max(peak_mem)))
 
-    print(f'Premise: {args.ndevs} devices, composing {max_inflight_nmb} micro-batches')
+    print(f'Placement: {args.ndevs} devices, composing {max_inflight_nmb} micro-batches')
     print(micro)
 
     # for inference, we don't consider memory
@@ -321,22 +354,3 @@ if __name__ == '__main__':
 
     if args.save is not None:
         schedule.save(args.save)
-
-    # from tessel.schedule.draw import Painter
-    # import os
-    # 
-    # if args.save is not None and schedule is not None:
-    #     Painter.visualize(
-    #         micro,
-    #         os.path.join(args.save, f"{args.premise}-micro.png")
-    #     )
-    #     repetend = schedule.extract(schedule.repetend[0], schedule.repetend[1])
-    #     schedule.save(os.path.join(args.save, f"{args.premise}-schedule.json"))
-    #     Painter.visualize(
-    #         schedule,
-    #         os.path.join(args.save, f"{args.premise}-schedule.png")
-    #     )
-    #     Painter.visualize(
-    #         repetend, 
-    #         os.path.join(args.save, f"{args.premise}-repetend.png")
-    #     )
