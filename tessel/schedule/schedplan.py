@@ -1,3 +1,5 @@
+
+from __future__ import annotations
 from typing import Dict, Set, Tuple, List, Optional
 import json
 import numpy as np
@@ -59,8 +61,10 @@ class SchedPlan:
         return self._blocks
     
     def chain_blocks(self) -> List[Block]:
-        """
-        sort all blocks by step from early to later
+        """Sort all blocks by step from early to later
+
+        Returns:
+            List[Block]: sorted blocks
         """
         blocks = []
         for step in range(self.nsteps):
@@ -70,8 +74,18 @@ class SchedPlan:
         return blocks
 
     def add_block(self, block: Block, device: List[int], step: int):
-        """Add a block into schedule plan. If the block is already inserted
-        inside the scheduling plan, the block must have same step and device.
+        """Add a block into schedule plan. 
+        
+        If the block is already inserted inside the scheduling plan,
+        the block must have same step and device.
+
+        Args:
+            block (Block): block to add
+            device (List[int]): list of device id
+            step (int): the starting step
+        
+        Returns:
+            None
         """
         if block in self._blocks:
             assert self.step(block) == step and tuple(self.device(block)) == tuple(device), (
@@ -97,16 +111,15 @@ class SchedPlan:
                 self._plans[devid][t] = block
 
     def add_block_seq(self, blocks: List[Optional[Block]], devices: List[Optional[Devices]]):
-        """
-        Add a sequence of blocks into schedule plan
+        """Add a sequence of blocks into schedule plan
 
         The None in blocks indicates an empty step, which will not place block
 
-        This assumes the blocks are dependent one after another.
-        This will add blocks starting from time step 0.
+        Data dependency will be added from prior block to the next block.
 
-        @param blocks List[Optional[Block]]
-        @param devices List[Optional[Devices]]
+        Args:
+            blocks (List[Block or None]): list of blocks to add. None indicates an empty step
+            devices (List[Devices or None]): list of devices to add. None indicates an empty step
         """
         assert len(blocks) == len(devices)
         step = 0
@@ -118,30 +131,71 @@ class SchedPlan:
         for blk1, blk2 in more_itertools.windowed(blocks, 2):
             Block.make_dependency(blk1, blk2)
 
-    def blocks(self, step: int) -> List[Block]:
+    def blocks(self, step: int) -> Tuple[Block]:
+        """Get blocks started at the given step
+
+        Note:
+            the returned blocks don't contain blocks that are
+            started at the previous steps but not finished yet.
+
+        Args:
+            step (int): the starting step
+
+        Returns:
+            Tuple[Block]: list of blocks
+        """
         return tuple(self._step_blocks[step])
     
     def step(self, block: Block) -> int:
+        """Get the starting step of the block
+
+        Args:
+            block (Block): the block
+
+        Returns:
+            int: the starting step
+        """
         return self._block_steps[block]
     
     def device(self, block: Block) -> Tuple[int]:
+        """Get the device of the block
+        
+        Args:
+            block (Block): the block
+
+        Returns:
+            Tuple[int]: list of device id
+        """
         return self._block_devices[block]
     
-    def extract(self, from_step: int, to_step: int):
+    def extract(self, from_step: int, to_step: int) -> SchedPlan:
+        """Extract a sub-schedule plan from steps of [from_step, to_step)
+        
+        Args:
+            from_step (int): start step
+            to_step (int): end step
+
+        Returns:
+            SchedPlan: a new schedule plan
+        """
         sched = SchedPlan(self.ndevs)
         for step in range(from_step, to_step):
             for block in self.blocks(step):
                 sched.add_block(block, self.device(block), step-from_step)
         return sched
     
-    def unroll(self, nmicros: int):
+    def unroll(self, nmicros: int) -> SchedPlan:
         """Unroll repetend to `nmicros` microbatches
 
-        @note the new blocks in unrolled schedule are not set
-        with any dependency.
+        Note:
+            the new blocks in unrolled schedule are not set
+            with any dependency.
         
-        @param nmicros int: numbe of microbatches
-        @return unrolled_plan SchedPlan: a new unrolled schedule plan
+        Args:
+            nmicros (int): the total number of microbatches
+        
+        Returns:
+            SchedPlan: a new unrolled schedule plan
         """
         assert self.repetend is not None
         rstart, rend = self.repetend
@@ -230,14 +284,20 @@ class SchedPlan:
         unrolled_plan.repetend = (rstart, rend + (rspan + rofst) * mid_ofst)
         return unrolled_plan
 
-    def copy(self, mid_offset: Optional[int] = 0):
-        """Copy the schedule plan and create the block with 
-        increased `mid_offset`
+    def copy(self, mid: Optional[int] = None) -> SchedPlan:
+        """Copy the plan with the blocks assigned by the given microbatch index
+        
+        Args:
+            mid (Optional[int], optional): microbatch index. Defaults to None (keep as same).
+        
+        Returns:
+            SchedPlan: a new schedule plan
         """
         blks: Dict[Block, Block] = {}
         def new(block: Block):
+            new_mid = block.mid if mid is None else mid
             return blks.setdefault(
-                block, Block(block.mid+mid_offset, block.span, block.memory, block.btype, block.gid))
+                block, Block(new_mid, block.span, block.memory, block.btype, block.gid))
 
         sched = SchedPlan(self.ndevs)
         for block in self._blocks:
@@ -322,7 +382,15 @@ class SchedPlan:
             json.dump(plans, f)
 
     @staticmethod
-    def load(filename: str):
+    def load(filename: str) -> SchedPlan:
+        """Load a schedule plan from a json file
+        
+        Args:
+            filename (str): the file name
+
+        Returns:
+            SchedPlan: a new schedule plan
+        """
         with open(filename, 'r') as f:
             plan = json.load(f)
         ndevs = plan['ndevs']
@@ -345,7 +413,15 @@ class SchedPlan:
         return schedplan
 
     @staticmethod
-    def concat(plans: List):
+    def concat(plans: List[SchedPlan]) -> SchedPlan:
+        """Concat a list of schedule plans into one
+        
+        Args:
+            plans (List[SchedPlan]): list of schedule plans
+
+        Returns:
+            SchedPlan: a new schedule plan
+        """
         cplan = SchedPlan(plans[0].ndevs)
         step_ofst = 0
         for plan in plans:
@@ -353,4 +429,3 @@ class SchedPlan:
                 cplan.add_block(block, plan.device(block), plan.step(block) + step_ofst)
             step_ofst += plan.nsteps
         return cplan
-
