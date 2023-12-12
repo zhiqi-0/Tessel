@@ -11,11 +11,11 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.graph import IRGraph
 from cube.graph.segment import IRSegment
 
-from tessel.utils.estimator import Estimator
-from tessel.placement.stage import StageSolver, ParallelSpec
-from tessel.placement.spmd import SpmdSolver
-from tessel.placement.block import IRBlock
-from tessel.config import TesselConfig
+from .estimator import Estimator
+from .placement.stage import StageSolver, ParallelSpec
+from .placement.spmd import SpmdSolver
+from .placement.block import IRBlock
+from .config import TesselConfig
 
 
 def staged_spmd(blocks: List[IRBlock],

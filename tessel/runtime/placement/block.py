@@ -5,7 +5,6 @@ import logging
 from cube.ir.cten import IRCell
 from cube.ir.operator import IRFwOperation
 from cube.graph.function.anchor import IRGraphAnchor
-from cube.graph.graph import IRGraph
 from cube.graph.segment import IRSegment
 
 

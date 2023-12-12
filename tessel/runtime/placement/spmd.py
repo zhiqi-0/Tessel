@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from cube.ir.cten import IRTensor
 
 from .block import IRBlock
-from ..utils.estimator import Estimator
+from ..estimator import Estimator
 
 _logger = logging.getLogger(__name__)
 
