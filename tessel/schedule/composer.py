@@ -220,16 +220,27 @@ class Composer:
         cooldown_devs = [blk2devices[blk] for blk in cooldown_blks]
         repetend_devs = [blk2devices[blk] for blk in repetend_blks]
 
+        # check memory limit
+        warmup_post_mem = Composer.memory(warmup_blks, warmup_devs, ndevs)
+        repetend_peak_mem = [repetend.peak_memory(devid) for devid in range(ndevs)]
+        post_repetend_peak_mem = [warmup_post_mem[devid] + repetend_peak_mem[devid] for devid in range(ndevs)]
+        if any(post_repetend_peak_mem[devid] > memory[devid] for devid in range(ndevs)):
+            raise RuntimeError(
+                f"Out of memory capacity: memory at least requires {post_repetend_peak_mem} = "
+                f"{warmup_post_mem} (post-warmup) + {repetend_peak_mem} (peak-repetend), "
+                f"but the memory limit is {memory}")
+    
         repetend_post_mem = Composer.memory(
             warmup_blks + repetend_blks, warmup_devs + repetend_devs, ndevs)
 
 
         CpuTimer().start('warmup')
-        warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, memory,
+        warmup_peak_mem = [memory[devid] - repetend.peak_memory(devid) for devid in range(ndevs)]
+        warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_peak_mem,
                                        optimizer=StepOptimalSolver)
         CpuTimer().stop('warmup')
         if warmup is None:
-            raise RuntimeError('Fail to find warmup schedule, check the mid hints or memory limits')
+            raise RuntimeError('Fail to find warmup schedule, check the memory limits')
 
         CpuTimer().start('cooldown')
         cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
@@ -237,7 +248,7 @@ class Composer:
                                          optimizer=StepOptimalSolver)
         CpuTimer().stop('cooldown')
         if cooldown is None:
-            raise RuntimeError('Fail to find cooldown schedule, check the mid hints or memory limits')
+            raise RuntimeError('Fail to find cooldown schedule, check the memory limits')
 
         print(f'> finish search')
         schedule = SchedPlan.concat([warmup, repetend, cooldown])

@@ -327,6 +327,21 @@ class SchedPlan:
             blk.after = set(new(ablock) for ablock in block.after)
         return sched
 
+    def peak_memory(self, device: int) -> float:
+        peak_mem = 0
+        curr_mem = 0
+        added = set()
+        for step in range(self.nsteps):
+            if step >= len(self.plans[device]):
+                break
+            blk = self.plans[device][step]
+            if blk is None or blk in added:
+                continue
+            curr_mem += blk.memory
+            peak_mem = max(peak_mem, curr_mem)
+            added.add(blk)
+        return peak_mem
+
     def __repr__(self) -> str:
         dscp = ''
         for devid in range(self.ndevs):
