@@ -5,7 +5,8 @@ from .schedplan import SchedPlan, Block
 from .repetend import MicroPicker
 from .solver import StepOptimalSolver, BubbleOptimalSolver, SolverBase
 
-from tessel.utils.timer import CpuTimer
+from ..timer import CpuTimer
+
 
 class Composer:
 
@@ -121,6 +122,126 @@ class Composer:
         schedule = SchedPlan.concat([warmup, repetend, cooldown])
         schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
 
+        return schedule
+
+    @staticmethod
+    def compose_fast(micro: SchedPlan, memory: int) -> Optional[SchedPlan]:
+        """Search the schedule by directly constructing the repetend"""
+        ndevs = micro.ndevs
+        memory = [memory] * ndevs
+
+        # step 1: condense the micro-batch plan to squeeze out bubbles
+        # by not considering data dependency
+        compact = SchedPlan(micro.ndevs)
+
+        def free_steps(micro: SchedPlan, devid: int, step_range: Tuple[int, int]) -> bool:
+            for t in range(*step_range):
+                order = micro.plans[devid]
+                if t < len(order) and order[t] is not None:
+                    return False
+            return True
+        
+        added = set()
+        for devid in range(micro.ndevs):
+            blocks = micro.device_blocks(devid)
+            # make block in starting time order
+            blocks = sorted(blocks, key=lambda blk: micro.step(blk))
+            # ================ optimization ==================
+            if devid % 2 == 1:
+                blocks = reversed(blocks)
+            # ================================================
+            max_step = 0
+            for blk in blocks:
+                if blk in added: continue
+                # find a step to locate
+                step = 0
+                while not free_steps(compact, devid, (step, step + blk.span)):
+                    step += 1
+                    if step > 10000:
+                        raise RuntimeError("Internal error: loop doesn't terminate")
+                # locate the block
+                compact.add_block(blk, micro.device(blk), step)
+                max_step = max(max_step, step + blk.span)
+                added.add(blk)
+        
+        print(f'> condensed micro-batch plan:\n{compact}')
+
+        # step 2: assign micro-batch indices
+        rchain_blocks = list(reversed(micro.chain_blocks()))
+        blk2mid = {}
+        for idx, blk in enumerate(rchain_blocks):
+            mid = 0
+            # print(f'{blk}{compact.device(blk)}: {blk.after}')
+            for succ_blk in rchain_blocks[:idx]:
+                if succ_blk in blk.after:
+                    # print(f'> {blk}{compact.device(blk)} -> {succ_blk}{compact.device(succ_blk)}')
+                    if compact.step(succ_blk) >= compact.step(blk) + blk.span:
+                        mid = max(mid, blk2mid[succ_blk])
+                    else:
+                        mid = max(mid, blk2mid[succ_blk] + 1)
+            blk2mid[blk] = mid
+
+        # step 3: construct repetend
+        nmicros = max(blk2mid.values()) + 1
+        micros = [micro.copy(mid) for mid in range(nmicros)]
+
+        repetend = SchedPlan(micro.ndevs)
+        for idx, blk in enumerate(micro.chain_blocks()):
+            step = compact.step(blk)
+            mid = blk2mid[blk]
+            micro_blk = micros[mid].chain_blocks()[idx]
+            repetend.add_block(micro_blk, micro.device(blk), step)
+        
+        print(f'> composed repetend ({nmicros} micros):\n{repetend}')
+
+        # step 4: construct warmup and cooldown
+        
+        chain_blocks: List[List[Block]] = []
+        blk2devices = {}
+        for m in micros:
+            blks = m.chain_blocks()
+            chain_blocks.append(blks)
+            blk2devices.update({blk: m.device(blk) for blk in blks})
+
+        warmup_blks, cooldown_blks = [], []
+        for idx, blk in enumerate(micro.chain_blocks()):
+            mid = blk2mid[blk]
+            # warmup blocks
+            for warmup_mid in range(mid):
+                blk = chain_blocks[warmup_mid][idx]
+                warmup_blks.append(blk)
+            # cooldown blocks
+            for cooldown_mid in range(mid + 1, nmicros):
+                blk = chain_blocks[cooldown_mid][idx]
+                cooldown_blks.append(blk)
+        repetend_blks = repetend.chain_blocks()
+        
+        warmup_devs = [blk2devices[blk] for blk in warmup_blks]
+        cooldown_devs = [blk2devices[blk] for blk in cooldown_blks]
+        repetend_devs = [blk2devices[blk] for blk in repetend_blks]
+
+        repetend_post_mem = Composer.memory(
+            warmup_blks + repetend_blks, warmup_devs + repetend_devs, ndevs)
+
+
+        CpuTimer().start('warmup')
+        warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, memory,
+                                       optimizer=StepOptimalSolver)
+        CpuTimer().stop('warmup')
+        if warmup is None:
+            raise RuntimeError('Fail to find warmup schedule, check the mid hints or memory limits')
+
+        CpuTimer().start('cooldown')
+        cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
+        cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, micro.ndevs, cooldown_pre_mem,
+                                         optimizer=StepOptimalSolver)
+        CpuTimer().stop('cooldown')
+        if cooldown is None:
+            raise RuntimeError('Fail to find cooldown schedule, check the mid hints or memory limits')
+
+        print(f'> finish search')
+        schedule = SchedPlan.concat([warmup, repetend, cooldown])
+        schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
         return schedule
 
     @staticmethod

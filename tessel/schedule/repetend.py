@@ -25,9 +25,13 @@ class MicroPicker:
     
     @staticmethod
     def pick(micros: List[SchedPlan]) -> Tuple[List[Block], List[Block], List[Block], Dict[Block, Devices]]:
-        """
+        """Yield warmup, repetend, cooldown blocks and block2device mapping
+
+        Args:
+            micros (List[SchedPlan]): list of placement of micro-batches
         
-        @yield warmup blocks, repetend blocks, cooldown blocks, block2device mapping
+        Yields:
+            warmup blocks, repetend blocks, cooldown blocks, block2device mapping
         """
         nmicros = len(micros)
         # collect device mapping

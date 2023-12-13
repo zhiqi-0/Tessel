@@ -57,6 +57,10 @@ class SchedPlan:
     def ndevs(self) -> int:
         return self._ndevs
 
+    @property
+    def plans(self) -> List[List[Optional[Block]]]:
+        return self._plans
+
     def all_blocks(self) -> Set[Block]:
         return self._blocks
     
@@ -167,6 +171,21 @@ class SchedPlan:
             Tuple[int]: list of device id
         """
         return self._block_devices[block]
+
+    def device_blocks(self, devid: int) -> Tuple[Block]:
+        """Get the blocks on the given device
+        
+        Args:
+            devid (int): device id
+
+        Returns:
+            Tuple[Block]: tuple of blocks that happend on the device
+        """
+        blocks = []
+        for blk in self.all_blocks():
+            if devid in self.device(blk):
+                blocks.append(blk)
+        return tuple(blocks)
     
     def extract(self, from_step: int, to_step: int) -> SchedPlan:
         """Extract a sub-schedule plan from steps of [from_step, to_step)
