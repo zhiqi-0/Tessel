@@ -21,8 +21,8 @@ class Block:
         self.memory = memory
         assert btype in ('forward', 'backward')
         self.btype = btype
-        self.before = set()
-        self.after = set()
+        self.before: Set[Block] = set()
+        self.after: Set[Block] = set()
         # sub-graph index
         self.gid: Optional[int] = _gid
 
@@ -341,6 +341,28 @@ class SchedPlan:
             peak_mem = max(peak_mem, curr_mem)
             added.add(blk)
         return peak_mem
+
+    def validate(self, complete: bool = True) -> bool:
+        """Check whether the schedule plan is valid (no data dependency conflict)
+
+        Args:
+            complete (bool, optional): if True, requires all blocks
+                in data dependency (block.after and block.before) should 
+                appear in the schedule. Defaults to True.
+        Returns:
+            bool: True if valid
+        """
+        for step in range(self.nsteps):
+            blks = self.blocks(step)
+            for blk in blks:
+                for bblk in blk.before:
+                    if complete:
+                        if bblk not in self._blocks:
+                            return False
+                    if bblk in self._blocks:
+                        if self.step(bblk) + bblk.span > step:
+                            return False
+        return True
 
     def __repr__(self) -> str:
         dscp = ''

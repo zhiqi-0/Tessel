@@ -12,6 +12,9 @@ class Composer:
 
     @staticmethod
     def compose(micro: SchedPlan, memory: int) -> SchedPlan:
+        # assign gid to blocks
+        for gid, blk in enumerate(micro.chain_blocks()):
+            blk.gid = gid
         ndevs = micro.ndevs
         peak_mem = [0] * ndevs
         for blk in micro.all_blocks():
@@ -34,6 +37,9 @@ class Composer:
     @staticmethod
     def compose_n(micro: SchedPlan, memory: int, nmicros: int) -> Optional[SchedPlan]:
         """Search the best schedule for using the number of microbatches"""
+        # assign gid to blocks
+        for gid, blk in enumerate(micro.chain_blocks()):
+            blk.gid = gid
         ndevs = micro.ndevs
         memory = [memory] * ndevs
         micros = [micro.copy(mid) for mid in range(nmicros)]
@@ -127,6 +133,9 @@ class Composer:
     @staticmethod
     def compose_fast(micro: SchedPlan, memory: int) -> Optional[SchedPlan]:
         """Search the schedule by directly constructing the repetend"""
+        # assign gid to blocks
+        for gid, blk in enumerate(micro.chain_blocks()):
+            blk.gid = gid
         ndevs = micro.ndevs
         memory = [memory] * ndevs
 
@@ -253,6 +262,9 @@ class Composer:
         print(f'> finish search')
         schedule = SchedPlan.concat([warmup, repetend, cooldown])
         schedule.repetend = (warmup.nsteps, warmup.nsteps + repetend.nsteps)
+        # check validation
+        assert schedule.validate(), f"Invalid schedule:\n{schedule}"
+        print(f'> validate schedule: OK')
         return schedule
 
     @staticmethod
