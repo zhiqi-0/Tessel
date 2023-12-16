@@ -3,6 +3,8 @@ import torch
 import cube
 
 from examples.gpt.blocks import TransformerLayer
+
+from cube.runtime.utils import create_dummy_dataloader
 from dataclasses import dataclass
 
 @dataclass
@@ -65,28 +67,18 @@ class GPT(torch.nn.Module):
         return loss
 
 
-class GPTDataLoader(cube.runtime.syndata.CubeDataLoader):
+def get_gpt_dummy_dataloader(batch_size: int, cfg: Config):
 
-    def __init__(self, bs: int, cfg: Config = None):
-        self.cfg = Config() if cfg is None else cfg
-        super().__init__(bs, [0, 0])
-        self.sample = None
-        self.set_batch_size(bs)
+    input_ids = torch.randint(
+        0, cfg.num_embeddings,
+        size=(cfg.seqlen,),
+        dtype=torch.int64,
+        device=torch.cuda.current_device()
+    )
+    position_ids = torch.arange(
+        0, cfg.seqlen, dtype=torch.int64,
+        device=torch.cuda.current_device()
+    ).view(cfg.seqlen,)
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        return self.sample
-    
-    def set_batch_size(self, batch_size: int):
-        self.batch_size = batch_size
-        input_ids = torch.randint(
-            0, self.cfg.num_embeddings,
-            size=(self.batch_size, self.cfg.seqlen),
-            dtype=torch.int64, device=torch.cuda.current_device()
-        )
-        position_ids = torch.arange(
-            0, self.cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
-        ).repeat(self.batch_size).view(self.batch_size, -1)
-        self.sample = (input_ids, position_ids)
+    return create_dummy_dataloader(
+        (input_ids, position_ids), batch_size)

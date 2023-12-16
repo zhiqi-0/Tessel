@@ -7,11 +7,11 @@ from cube.graph.function.anchor import IRGraphAnchor
 from cube.graph.function.dimops import IRDimops
 from cube.ir.operator import IRFwOperation
 
-from tessel.runtime.utils import tensor_parallelism, replica
-from tessel.config import tesselConfig
+from tessel.runtime.policy import tensor_parallelism, replica
+from tessel.runtime.config import TesselConfig
 from tessel.runtime.core import staged_spmd, instantiate
-from tessel.placement.block import blocking
-from tessel.placement.stage import ParallelSpec
+from tessel.runtime.placement.block import blocking
+from tessel.runtime.placement.stage import ParallelSpec
 
 
 def tp_func(graph, fnode, devices: Tuple[int]):
@@ -30,7 +30,7 @@ def vshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: tesselConfig):
+           config: TesselConfig):
     
     fnodes = graph.select(ntype=IRFwOperation)
     blocks = blocking(fnodes, config.max_layer_num)
@@ -50,7 +50,7 @@ def xshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: tesselConfig):
+           config: TesselConfig):
 
     assert ngpus % 4 == 0
     tp_size = ngpus // 4
@@ -95,7 +95,7 @@ def mshape(graph: IRGraph,
            ngpus: int,
            mbs: int,
            mem_limit: int,
-           config: tesselConfig) -> IRGraph:
+           config: TesselConfig) -> IRGraph:
 
     fnodes = graph.select(ntype=IRFwOperation)
     anchor = graph.select(ntype=IRGraphAnchor)[0]

@@ -2,7 +2,7 @@
 import torch
 from functools import partial
 
-from examples.gpt.model import Config, GPT, GPTDataLoader
+from examples.gpt.model import Config, GPT, get_gpt_dummy_dataloader
 from examples.gpt.placement import vshape, xshape, mshape, tp_func
 
 import cube
@@ -10,8 +10,8 @@ from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
 from cube.runtime.device import DeviceGroup
 
-from tessel.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PAStessel, PASFullTP
-from tessel.config import build_config, build_parser
+from tessel.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PASTessel, PASFullTP
+from tessel.runtime.config import build_config, build_parser
 
 import argparse
 
@@ -72,7 +72,7 @@ def train():
                                  premise=xshape,
                                  config=config)
     elif args.premise == 'tessel':
-        runtime_policy = partial(PAStessel,
+        runtime_policy = partial(PASTessel,
                                  mbs=args.mbs,
                                  nmicros=args.gbs//args.mbs,
                                  premise=mshape,
@@ -100,7 +100,7 @@ def train():
         model = model.half() if args.fp16 else model
     else:
         model = None
-    dataloader = GPTDataLoader(args.mbs, cfg)
+    dataloader = get_gpt_dummy_dataloader(args.mbs, cfg)
 
     if torch.distributed.get_rank() == 0:
         nparams = 0
@@ -108,7 +108,6 @@ def train():
             nparams += param.nelement()
         print(f'full model parameter: {nparams}')
 
-    model = cube.SemanticModel(model)
     @cube.compile(model, dataloader, PAS=runtime_policy, override=True, load_content=False, 
                   comm_cost_fn=lambda x: 1)
     def train_iter(model, dataloader):
@@ -116,7 +115,7 @@ def train():
         loss = model(*datas)
         loss.backward()
         # return loss
-    model: torch.nn.Module = model.get_gen_module()
+    model: torch.nn.Module = cube.load_model(load_content=False)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, betas=(0.9, 0.999))
 
@@ -129,6 +128,7 @@ def train():
     print_each_rank(f'model parameter: {nparams}')
 
     CudaTimer(enable=False).warmup()
+    dataloader = iter(dataloader)
     iter_num, warmup = 3, 2
     for step in range(iter_num):
 
