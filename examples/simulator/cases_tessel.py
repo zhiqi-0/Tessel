@@ -4,7 +4,7 @@ import math
 
 from tessel.schedule.schedplan import SchedPlan, Block
 from tessel.schedule.composer import Composer
-from tessel.utils.timer import CpuTimer
+from tessel.timer import CpuTimer
 
 
 FW='forward'
@@ -303,7 +303,7 @@ if __name__ == '__main__':
     parser.add_argument('--placement', type=str)
     parser.add_argument('--ndevs', type=int,
                         help='number of devices')
-    parser.add_argument('--nmicros', type=int,
+    parser.add_argument('--nmicros', type=int, default=None,
                         help='number of micro-batches')
     parser.add_argument('--memory', type=int,
                         help='memory limits')
@@ -311,6 +311,8 @@ if __name__ == '__main__':
                         help='save searched schedule under a folder')
     parser.add_argument('--infer', action='store_true', default=False,
                         help='search for inference schedule')
+    parser.add_argument('--fast-search', action='store_true', default=False,
+                        help='use fast search')
     args = parser.parse_args()
 
     print('============== Scheduling Solver ================')
@@ -319,19 +321,6 @@ if __name__ == '__main__':
 
     placement = getattr(Placement, args.placement)
     micro: SchedPlan = placement(args.ndevs, train=not args.infer)
-    for gid, blk in enumerate(micro.chain_blocks()):
-        blk.gid = gid
-
-    # calculate max inflight micro-batches
-    ndevs = micro.ndevs
-    peak_mem = [0] * ndevs
-    for blk in micro.all_blocks():
-        if blk.memory > 0:
-            for devid in micro.device(blk):
-                peak_mem[devid] += blk.memory
-    max_inflight_nmb = int(math.ceil(args.memory / max(peak_mem)))
-
-    print(f'Placement: {args.ndevs} devices, composing {max_inflight_nmb} micro-batches')
     print(micro)
 
     # for inference, we don't consider memory
@@ -340,7 +329,11 @@ if __name__ == '__main__':
             block.memory = 0
 
     CpuTimer(enable=True).start('search e2e')
-    schedule = Composer.compose_n(micro, args.memory, max_inflight_nmb)
+    if not args.fast_search:
+        print('using compose_n for search')
+        schedule = Composer.compose_n(micro, args.memory, args.nmicros)
+    else:
+        schedule = Composer.compose_fast(micro, args.memory)
     CpuTimer().stop('search e2e')
 
     print('\n' + '=' * 48)
@@ -350,7 +343,8 @@ if __name__ == '__main__':
         print(f'no solution')
     else:
         print(f'best schedule:\n{schedule}')
-        print(f'Unrolled schedule:\n{schedule.unroll(max_inflight_nmb + 2)}')
+        nmicros = max(blk.mid for blk in schedule.all_blocks()) + 1
+        print(f'Unrolled schedule:\n{schedule.unroll(nmicros + 2)}')
 
     if args.save is not None:
         schedule.save(args.save)
