@@ -151,10 +151,25 @@ class SolverBase:
             for blk1, blk2 in more_itertools.windowed(blocks, 2):
                 self._solver.add(self.start(blk1) < self.start(blk2))
 
-    def solve(self, var, upper_var: int, lower_var: int, silence = True) -> Optional[int]:
-        """Find lowest value for var given boundary of [upper_var, lower_var)"""
+    def solve(self, var, upper_var: int, lower_var: int, accept: Optional[int] = None, silence = True) -> Optional[int]:
+        """Find lowest value for var given boundary of [lower_var, upper_var)
+        
+        Args:
+            var (z3.ArithRef): the variable to be solved
+            upper_var (int): the upper boundary of the variable
+            lower_var (int): the lower boundary of the variable
+            accept (Optional[int], optional): if provided, once find the result equal or smaller
+                than the accept value, the solver will stop the search and return the found one.
+                Defaults to None.
+            silence (bool, optional): whether to print the progress. Defaults to True.
+
+        Returns:
+            Optional[int]: the found optimal value
+        """
         self._solution = None
         upper, lower = upper_var, lower_var
+        accept = lower_var if accept is None else accept
+        accept = min(accept, upper - 1)
 
         # =============== use z3.Optimize() as self._solver ==============
         # self._solver.add(z3.And(lower <= var, var < upper))
@@ -166,7 +181,7 @@ class SolverBase:
         # ================================================================
 
         opt = upper
-        while lower < upper:
+        while lower < upper and opt > accept:
             try_var = (lower + upper) // 2
             self._solver.push()
             self._solver.add(var == try_var)
@@ -202,7 +217,8 @@ class SolverBase:
         """
         iterate all possible solutions given the searched solutions
 
-        @yield solution SchedPlan
+        Yields:
+            SchedPlan: the solution
         """
         assert self._solved, "Expected first call of solve"
         # step = self._solution.eval(var).as_long()
@@ -237,10 +253,19 @@ class StepOptimalSolver(SolverBase):
             end = self.stop(block)
             self._nsteps = z3.If(end > self._nsteps, end, self._nsteps)
 
-    def solve(self, memory: List[int], upper_time: Optional[int] = None, silence = True) -> Optional[int]:
+    def solve(self, memory: List[int], upper_time: Optional[int] = None, accept: Optional[int] = None, silence = True) -> Optional[int]:
         """Find step optimal plans given the time constraints of [0, upper_time-1]
 
-        @param memory List[int]: the memory constraint of each device
+        Args:
+            memory (List[int]): the memory constraint of each device
+            upper_time (int or None): the upper boundary of the time. Defaults to None.
+            accept (int or None): if provided, once find the result equal or smaller
+                than the accept value, the solver will stop the search and return the found one.
+                Defaults to None.
+            silence (bool, optional): whether to print the progress. Defaults to True.
+
+        Returns:
+            Optional[int]: the found optimal value
         """
         self.mono_mid_constraints()
         self._solution = None
@@ -250,7 +275,7 @@ class StepOptimalSolver(SolverBase):
         self.init_nsteps()
         upper = upper_time if upper_time is not None \
             else sum(blk.span for blk in self._blocks) + 1
-        self._opt = super().solve(self._nsteps, upper, 0, silence)
+        self._opt = super().solve(self._nsteps, upper, 0, accept, silence)
         return self._opt
 
     def satisfy(self, memory: List[int]) -> bool:
@@ -391,9 +416,19 @@ class BubbleOptimalSolver(SolverBase):
                 have_block = z3.Or(have_block, z3.And(start <= step, step < stop))
             self._solver.add(z3.If(step < maxstep, have_block, True))
 
-    def solve(self, memory: List[int], upper_nbubbles: Optional[int] = None, silence=True) -> Optional[int]:
-        """
-        Find the lowest bubble given the bubble range constraints [0, upper_nbubbles-1]
+    def solve(self, memory: List[int], upper_nbubbles: Optional[int] = None, accept: Optional[int] = None, silence=True) -> Optional[int]:
+        """Find the lowest-bubble plan given the bubble range constraints [0, upper_nbubbles-1]
+
+        Args:
+            memory (List[int]): the memory constraint of each device
+            upper_nbubbles (int or None): the upper boundary of the bubble. Defaults to None.
+            accept (int or None): if provided, once find the result equal or smaller
+                than the accept value, the solver will stop the search and return the found one.
+                Defaults to None.
+            silence (bool, optional): whether to print the progress. Defaults to True.
+        
+        Returns:
+            Optional[int]: the found optimal value
         """
         self.mono_mid_constraints()
         # init memory
@@ -408,7 +443,7 @@ class BubbleOptimalSolver(SolverBase):
         # stride the plan
         self.stride()
 
-        self._opt = super().solve(self._nbubbles, upper_nbubbles, 0, silence)
+        self._opt = super().solve(self._nbubbles, upper_nbubbles, 0, accept, silence)
         return self._opt
 
     def solutions(self):

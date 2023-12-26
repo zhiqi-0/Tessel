@@ -131,8 +131,20 @@ class Composer:
         return schedule
 
     @staticmethod
-    def compose_fast(micro: SchedPlan, memory: int) -> Optional[SchedPlan]:
-        """Search the schedule by directly constructing the repetend"""
+    def compose_fast(micro: SchedPlan, memory: int,
+                     wc_ratio: Tuple[int, int] = (64, 0.05)) -> Optional[SchedPlan]:
+        """Search the schedule by directly constructing the repetend
+        
+        Args:
+            micro (SchedPlan): the micro-batch plan
+            memory (int): memory limit
+            wc_ratio (Tuple[int, int]): 
+                total number of microbatches,
+                accepted warmup / cooldown bubble ratio for the schedule
+
+        Returns:
+            SchedPlan or None: the searched schedule plan
+        """
         # assign gid to blocks
         for gid, blk in enumerate(micro.chain_blocks()):
             blk.gid = gid
@@ -242,19 +254,28 @@ class Composer:
         repetend_post_mem = Composer.memory(
             warmup_blks + repetend_blks, warmup_devs + repetend_devs, ndevs)
 
+        nsteps = repetend.nsteps
+        total_micros, accept_ratio = wc_ratio
+        max_bubble = nsteps * total_micros * accept_ratio
 
         CpuTimer().start('warmup')
         warmup_peak_mem = [memory[devid] - repetend.peak_memory(devid) for devid in range(ndevs)]
+        warmup_comp = sum(blk.span * len(blk2devices[blk]) for blk in warmup_blks) // ndevs
+        warmup_accept = int(warmup_comp + max_bubble)
+        print(f'> warmup accept time steps: {warmup_accept}')
         warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_peak_mem,
-                                       optimizer=StepOptimalSolver)
+                                       accept=warmup_accept, optimizer=StepOptimalSolver)
         CpuTimer().stop('warmup')
         if warmup is None:
             raise RuntimeError('Fail to find warmup schedule, check the memory limits')
 
         CpuTimer().start('cooldown')
         cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
+        cooldown_comp = sum(blk.span * len(blk2devices[blk]) for blk in cooldown_blks) // ndevs
+        cooldown_accept = int(cooldown_comp + max_bubble)
+        print(f'> cooldown accept time steps: {cooldown_accept}')
         cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, micro.ndevs, cooldown_pre_mem,
-                                         optimizer=StepOptimalSolver)
+                                         accept=cooldown_accept, optimizer=StepOptimalSolver)
         CpuTimer().stop('cooldown')
         if cooldown is None:
             raise RuntimeError('Fail to find cooldown schedule, check the memory limits')
@@ -270,7 +291,26 @@ class Composer:
     @staticmethod
     def construct(blocks: List[Block], devices: List[Tuple[int]],
                   ndevs: int, memory: Tuple[int],
-                  upper: Optional[int]=None, optimizer: Optional[SolverBase] = StepOptimalSolver) -> Tuple[Optional[SchedPlan], Optional[int]]:
+                  upper: Optional[int]=None, 
+                  accept: Optional[int]=None,
+                  optimizer: Optional[SolverBase] = StepOptimalSolver) -> Tuple[Optional[SchedPlan], Optional[int]]:
+        """Construct a schedule given the blocks, devices and memory constraints.
+
+        Args:
+            blocks (List[Block]): blocks to be scheduled
+            devices (List[Tuple[int]]): devices of each block
+            ndevs (int): number of devices
+            memory (Tuple[int]): memory constraints
+            upper (int or None): upper bound of the number of steps. Defaults to None.
+            accept (int or None): accept the solution if the solver target is equal or less than accept.
+                Defaults to None, finding the optimal solution.
+            optimizer (SolverBase or None): optimizer to be used. Defaults to StepOptimalSolver.
+        
+        Returns:
+            SchedPlan or None: the schedule plan
+            int or None: the optimized solver target
+        """
+        
         solver = optimizer(ndevs)
         # step 1 add block inside solver
         for block, devs in zip(blocks, devices):
@@ -282,7 +322,7 @@ class Composer:
                     # print(f'> add dependency: {blk1}-dev{devices[idx1]} -> {blk2}-dev{devices[idx2]}')
                     solver.add_dependency_constraints([blk1, blk2])
         # step 3 construct
-        lowest = solver.solve(memory, upper, silence=True)
+        lowest = solver.solve(memory, upper, accept, silence=True)
         if lowest is None:
             print(f"{optimizer.__name__}: Fail to find a solution given boundary constraints ( solution > {upper} (upper) )\n")
             return None, None
