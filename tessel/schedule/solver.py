@@ -152,7 +152,7 @@ class SolverBase:
                 self._solver.add(self.start(blk1) < self.start(blk2))
 
     def solve(self, var, upper_var: int, lower_var: int, accept: Optional[int] = None, silence = True) -> Optional[int]:
-        """Find lowest value for var given boundary of [lower_var, upper_var)
+        """Find lowest value for var given boundary of [lower_var, upper_var]
         
         Args:
             var (z3.ArithRef): the variable to be solved
@@ -184,7 +184,7 @@ class SolverBase:
         while lower < upper and opt > accept:
             try_var = (lower + upper) // 2
             self._solver.push()
-            self._solver.add(var == try_var)
+            self._solver.add(var <= try_var)
             if not silence:
                 sys.stdout.write('checking solution of {:<4}.........'.format(try_var))
                 sys.stdout.flush()
@@ -192,7 +192,7 @@ class SolverBase:
                 if not silence: print(f'Yes', flush=True)
                 sys.stdout.flush()
                 self._solution = self._solver.model()
-                upper, opt = try_var, try_var
+                upper = opt = self._solution.eval(var).as_long()
             else:
                 if not silence: print(f'Fail', flush=True)
                 sys.stdout.flush()
