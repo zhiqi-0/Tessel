@@ -72,8 +72,9 @@ class SchedPlan:
         """
         blocks = []
         for step in range(self.nsteps):
-            for block in self.blocks(step):
-                blocks.append(block)
+            step_blocks = self.blocks(step)
+            step_blocks = sorted(step_blocks, key=lambda blk: self.device(blk)[0])
+            blocks += step_blocks
         assert len(blocks) == len(self._blocks)
         return blocks
 
@@ -342,6 +343,26 @@ class SchedPlan:
             added.add(blk)
         return peak_mem
 
+    def tighten(self):
+        """Tight the schedule plan by removing empty steps"""
+        print(self)
+        step = 0
+        while step < self.nsteps:
+            if all(self.plans[devid][step] is None for devid in range(self.ndevs)):
+                for blk in self._blocks:
+                    if self.step(blk) > step:
+                        self._block_steps[blk] -= 1
+                for t in range(step + 1, self.nsteps):
+                    if t in self._step_blocks:
+                        self._step_blocks[t-1] = self._step_blocks[t]
+                        del self._step_blocks[t]
+                for devid in range(self.ndevs):
+                    self._plans[devid].pop(step)
+                self._nsteps -= 1
+            else:
+                step += 1
+        print(self)
+
     def validate(self, complete: bool = True) -> bool:
         """Check whether the schedule plan is valid (no data dependency conflict)
 
@@ -361,6 +382,13 @@ class SchedPlan:
                             return False
                     if bblk in self._blocks:
                         if self.step(bblk) + bblk.span > step:
+                            # raise RuntimeError(
+                            #     f"Data dependency conflict: "
+                            #     f"{bblk}(step={self.step(bblk)},device={self.device(bblk)})"
+                            #     f" -> "
+                            #     f"{blk}(step={self.step(blk)},device={self.device(blk)})\n"
+                            #     f"{self}"
+                            # )
                             return False
         return True
 

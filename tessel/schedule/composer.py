@@ -204,15 +204,20 @@ class Composer:
 
         # step 3: construct repetend
         nmicros = max(blk2mid.values()) + 1
-        micros = [micro.copy(mid) for mid in range(nmicros)]
+        micros: List[SchedPlan] = [micro.copy(mid) for mid in range(nmicros)]
 
         repetend = SchedPlan(micro.ndevs)
         for idx, blk in enumerate(micro.chain_blocks()):
             step = compact.step(blk)
             mid = blk2mid[blk]
             micro_blk = micros[mid].chain_blocks()[idx]
-            repetend.add_block(micro_blk, micro.device(blk), step)
+            assert micros[mid].device(micro_blk) == micro.device(blk), \
+                f"Internal error: device mismatch: {micros[mid].device(micro_blk)} != {micro.device(blk)}"
+            devices = micros[mid].device(micro_blk)
+            repetend.add_block(micro_blk, devices, step)
         
+        if not repetend.validate(complete=False):
+            raise ValueError(f"Internal error: invalid repetend:\n{repetend}")
         print(f'> composed repetend ({nmicros} micros):\n{repetend}')
 
         # step 4: construct warmup and cooldown
@@ -265,6 +270,7 @@ class Composer:
         print(f'> warmup accept time steps: {warmup_accept}')
         warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_peak_mem,
                                        accept=warmup_accept, optimizer=StepOptimalSolver)
+        warmup.tighten()
         CpuTimer().stop('warmup')
         if warmup is None:
             raise RuntimeError('Fail to find warmup schedule, check the memory limits')
@@ -276,6 +282,7 @@ class Composer:
         print(f'> cooldown accept time steps: {cooldown_accept}')
         cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, micro.ndevs, cooldown_pre_mem,
                                          accept=cooldown_accept, optimizer=StepOptimalSolver)
+        cooldown.tighten()
         CpuTimer().stop('cooldown')
         if cooldown is None:
             raise RuntimeError('Fail to find cooldown schedule, check the memory limits')
