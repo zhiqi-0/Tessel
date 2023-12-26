@@ -345,7 +345,6 @@ class SchedPlan:
 
     def tighten(self):
         """Tight the schedule plan by removing empty steps"""
-        print(self)
         step = 0
         while step < self.nsteps:
             if all(self.plans[devid][step] is None for devid in range(self.ndevs)):
@@ -361,7 +360,6 @@ class SchedPlan:
                 self._nsteps -= 1
             else:
                 step += 1
-        print(self)
 
     def validate(self, complete: bool = True) -> bool:
         """Check whether the schedule plan is valid (no data dependency conflict)
