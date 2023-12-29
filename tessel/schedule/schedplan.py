@@ -3,12 +3,16 @@ from __future__ import annotations
 from typing import Dict, Set, Tuple, List, Optional
 import json
 import numpy as np
+import logging
 
 import more_itertools
 
 
 StartEnd = Tuple[int, int]
 Devices = Tuple[int, ...]
+
+
+_logger = logging.getLogger(__name__)
 
 
 class Block:
@@ -343,8 +347,8 @@ class SchedPlan:
             added.add(blk)
         return peak_mem
 
-    def tighten(self):
-        """Tight the schedule plan by removing empty steps"""
+    def stride(self):
+        """Remove empty steps inside the schedule"""
         step = 0
         while step < self.nsteps:
             if all(self.plans[devid][step] is None for devid in range(self.ndevs)):
@@ -360,6 +364,96 @@ class SchedPlan:
                 self._nsteps -= 1
             else:
                 step += 1
+
+    def shift(self, block: Block, offset: int):
+        """Shift block by offset steps
+        
+        Args:
+            block (Block): the block to shift
+            offset (int): the offset steps
+
+        Raises:
+            KeyError: if the block is not in the schedule plan
+            RuntimeError: if the block cannot shift by the given offset
+
+        Returns:
+            None
+        """
+        if offset == 0: return
+        if block not in self._blocks:
+            raise KeyError(f"Block {block} not in schedule plan")
+        curr_step = self.step(block)
+        if curr_step + offset < 0:
+            raise RuntimeError(f"Block {block} cannot shift by {offset} steps (happen before time 0)")
+        start = curr_step + offset
+        end = start + block.span
+        # check time slot empty
+        for step in range(start, end):
+            for device in self.device(block):
+                if step < self.nsteps and self.plans[device][step] not in (None, block):
+                    raise RuntimeError(f"Block {block} cannot shift by {offset} steps (conflict with other blocks)")
+        # expand steps if necessary
+        if end >= self.nsteps:
+            for devplan in self._plans:
+                devplan += [None] * (end - self.nsteps)
+            for t in range(self.nsteps, end):
+                self._step_blocks.setdefault(t, [])
+            self._nsteps = end
+        # remove block from old steps
+        self._step_blocks[curr_step].remove(block)
+        for step in range(curr_step, curr_step + block.span):
+            for devid in self.device(block):
+                self._plans[devid][step] = None
+        # update block to new steps
+        self._block_steps[block] = start
+        self._step_blocks.setdefault(start, []).append(block)
+        for step in range(start, end):
+            for devid in self.device(block):
+                self._plans[devid][step] = block
+
+    def tighten(self):
+        """Tighten the schedule plan by making blocks happen as early as possible.
+        
+        The process doesn't change the execution order of blocks for each device.
+        """
+        for step in range(self.nsteps):
+            blocks = self.blocks(step)
+            for blk in blocks:
+                devices = self.device(blk)
+                # get available minimal start step without changing schedule order
+                min_start = step
+                while min_start > 0:
+                    # empty step
+                    if all(self.plans[devid][min_start-1] is None for devid in devices):
+                        min_start -= 1
+                    else:
+                        break
+                if min_start == step:
+                    continue
+                # consider data dependency
+                pres = [pre for pre in blk.before if pre in self._blocks]
+                end = max(self.step(pre) + pre.span for pre in pres) if len(pres) > 0 else 0
+                min_start = max(end, min_start)
+                if min_start == step:
+                    continue
+                # shift the block ahead if there are available steps
+                for st in range(min_start, step):
+                    available = True
+                    for t in range(st, st + blk.span):
+                        if any(self.plans[devid][t] not in (None, blk) for devid in devices):
+                            available = False
+                            break
+                    if available:
+                        self.shift(blk, st - step)
+                        break
+        # remove tail empty steps
+        while self.nsteps > 0:
+            if all(self.plans[devid][self.nsteps-1] is None for devid in range(self.ndevs)):
+                for devid in range(self.ndevs):
+                    self._plans[devid].pop()
+                self._nsteps -= 1
+            else:
+                break
 
     def validate(self, complete: bool = True) -> bool:
         """Check whether the schedule plan is valid (no data dependency conflict)
@@ -377,16 +471,18 @@ class SchedPlan:
                 for bblk in blk.before:
                     if complete:
                         if bblk not in self._blocks:
+                            _logger.error(f"Validation check fail: missing depdendent block {bblk}")
                             return False
                     if bblk in self._blocks:
                         if self.step(bblk) + bblk.span > step:
-                            # raise RuntimeError(
-                            #     f"Data dependency conflict: "
-                            #     f"{bblk}(step={self.step(bblk)},device={self.device(bblk)})"
-                            #     f" -> "
-                            #     f"{blk}(step={self.step(blk)},device={self.device(blk)})\n"
-                            #     f"{self}"
-                            # )
+                            error_msg = (
+                                f"Validation check fail: data dependency conflict: "
+                                f"{bblk}(step={self.step(bblk)},device={self.device(bblk)})"
+                                f" -> "
+                                f"{blk}(step={self.step(blk)},device={self.device(blk)})\n"
+                                f"{self}"
+                            )
+                            _logger.error(error_msg)
                             return False
         return True
 

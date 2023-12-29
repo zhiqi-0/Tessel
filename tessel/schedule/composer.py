@@ -1,5 +1,6 @@
 from typing import List, Tuple, Optional
 import math
+# import multiprocessing as mp
 
 from .schedplan import SchedPlan, Block
 from .repetend import MicroPicker
@@ -132,7 +133,7 @@ class Composer:
 
     @staticmethod
     def compose_fast(micro: SchedPlan, memory: int,
-                     wc_ratio: Tuple[int, int] = (64, 0.05)) -> Optional[SchedPlan]:
+                     wc_ratio: Tuple[int, int] = (128, 0.05)) -> Optional[SchedPlan]:
         """Search the schedule by directly constructing the repetend
         
         Args:
@@ -185,7 +186,7 @@ class Composer:
                 max_step = max(max_step, step + blk.span)
                 added.add(blk)
         
-        print(f'> condensed micro-batch plan:\n{compact}')
+        print(f'> plan compaction:\n{compact}')
 
         # step 2: assign micro-batch indices
         rchain_blocks = list(reversed(micro.chain_blocks()))
@@ -263,6 +264,17 @@ class Composer:
         total_micros, accept_ratio = wc_ratio
         max_bubble = nsteps * total_micros * accept_ratio
 
+        # with mp.Pool() as pool:
+        #     result1 = pool.apply_async(
+        #         Composer.construct, (warmup_blks, warmup_devs, ndevs, warmup_peak_mem,
+        #                              None, warmup_accept, StepOptimalSolver))
+        #     result2 = pool.apply_async(
+        #         Composer.construct, (cooldown_blks, cooldown_devs, micro.ndevs, cooldown_pre_mem,
+        #                              None, cooldown_accept, StepOptimalSolver))
+        # 
+        #     warmup, _ = result1.get()
+        #     cooldown, _ = result2.get()
+
         CpuTimer().start('warmup')
         warmup_peak_mem = [memory[devid] - repetend.peak_memory(devid) for devid in range(ndevs)]
         warmup_comp = sum(blk.span * len(blk2devices[blk]) for blk in warmup_blks) // ndevs
@@ -274,7 +286,7 @@ class Composer:
         CpuTimer().stop('warmup')
         if warmup is None:
             raise RuntimeError('Fail to find warmup schedule, check the memory limits')
-
+        
         CpuTimer().start('cooldown')
         cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
         cooldown_comp = sum(blk.span * len(blk2devices[blk]) for blk in cooldown_blks) // ndevs
