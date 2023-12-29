@@ -166,8 +166,17 @@ class Composer:
         added = set()
         for devid in range(micro.ndevs):
             blocks = micro.device_blocks(devid)
-            # make block in starting time order
-            blocks = sorted(blocks, key=lambda blk: micro.step(blk))
+            # primary criteron: schedule blocks with multiple devices to two sides,
+            # secondary criteron: blocks in time step 
+            def criteron(blk):
+                ndevs = len(micro.device(blk))
+                if ndevs > 1:
+                    ndevs = 0-ndevs if blk.btype == 'forward' else ndevs
+                else:
+                    ndevs = 0
+                return (ndevs, micro.step(blk))
+            blocks = sorted(blocks, key=criteron)
+            # blocks = sorted(blocks, key=lambda blk: len(micro.device(blk)))
             # ================ optimization ==================
             if devid % 2 == 1:
                 blocks = reversed(blocks)
