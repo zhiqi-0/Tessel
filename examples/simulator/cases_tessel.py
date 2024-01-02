@@ -345,6 +345,11 @@ if __name__ == '__main__':
         print(f'best schedule:\n{schedule}')
         nmicros = max(blk.mid for blk in schedule.all_blocks()) + 1
         print(f'Unrolled schedule:\n{schedule.unroll(nmicros + 2)}')
+        print(f'peak memory of each device: {[schedule.peak_memory(devid) for devid in range(args.ndevs)]}')
+        warmup_step = schedule.repetend[0]
+        repetend_step = schedule.repetend[1] - schedule.repetend[0]
+        cooldown_steps = schedule.nsteps - schedule.repetend[1]
+        print(f'warmup nsteps: {warmup_step}, repetend nsteps: {repetend_step}, cooldown nsteps: {cooldown_steps}')
 
     if args.save is not None:
         schedule.save(args.save)
