@@ -1,5 +1,6 @@
 from typing import List, Tuple, Optional
 import math
+import sys
 # import multiprocessing as mp
 
 from .schedplan import SchedPlan, Block
@@ -229,6 +230,7 @@ class Composer:
         if not repetend.validate(complete=False):
             raise ValueError(f"Internal error: invalid repetend:\n{repetend}")
         print(f'> composed repetend ({nmicros} micros):\n{repetend}')
+        sys.stdout.flush()
 
         # step 4: construct warmup and cooldown
         
