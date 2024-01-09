@@ -43,9 +43,11 @@ class MicroPicker:
         ref = micros[0]
         blocks = ref.chain_blocks()
     
-        nspace = math.comb(len(blocks)-1, nmicros-1)
+        # nspace = math.comb(len(blocks)-1, nmicros-1)
+        space = tuple(MicroPicker.select(len(blocks), nmicros))
+        nspace = len(space)
         # TODO: support multi-branch
-        for pidx, mids in enumerate(MicroPicker.select(len(blocks), nmicros)):
+        for pidx, mids in enumerate(space):
             print(f'[{pidx}/{nspace}] assigning mids: {mids}')
             warmup, repetend, cooldown = [], [], []
             # collect repetend blocks

@@ -313,6 +313,10 @@ if __name__ == '__main__':
                         help='search for inference schedule')
     parser.add_argument('--fast-search', action='store_true', default=False,
                         help='use fast search')
+    parser.add_argument('--fast-ratio', type=float, default=0.05,
+                        help='fast search ratio')
+    parser.add_argument('--fast-no-flip', action='store_false', default=True,
+                        help='fast search without flip optimization')
     args = parser.parse_args()
 
     print('============== Scheduling Solver ================')
@@ -333,7 +337,7 @@ if __name__ == '__main__':
         print('using compose_n for search')
         schedule = Composer.compose_n(micro, args.memory, args.nmicros)
     else:
-        schedule = Composer.compose_fast(micro, args.memory)
+        schedule = Composer.compose_fast(micro, args.memory, wc_ratio=(128, args.fast_ratio), flip=args.fast_no_flip)
     CpuTimer().stop('search e2e')
 
     print('\n' + '=' * 48)

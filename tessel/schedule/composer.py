@@ -134,7 +134,8 @@ class Composer:
 
     @staticmethod
     def compose_fast(micro: SchedPlan, memory: int,
-                     wc_ratio: Tuple[int, int] = (128, 0.05)) -> Optional[SchedPlan]:
+                     wc_ratio: Tuple[int, int] = (128, 0.05),
+                     flip: bool = True) -> Optional[SchedPlan]:
         """Search the schedule by directly constructing the repetend
         
         Args:
@@ -179,7 +180,7 @@ class Composer:
             blocks = sorted(blocks, key=criteron)
             # blocks = sorted(blocks, key=lambda blk: len(micro.device(blk)))
             # ================ optimization ==================
-            if devid % 2 == 1:
+            if flip and devid % 2 == 1:
                 blocks = reversed(blocks)
             # ================================================
             max_step = 0
@@ -290,9 +291,10 @@ class Composer:
         warmup_peak_mem = [memory[devid] - repetend.peak_memory(devid) for devid in range(ndevs)]
         warmup_comp = sum(blk.span * len(blk2devices[blk]) for blk in warmup_blks) // ndevs
         warmup_accept = int(warmup_comp + max_bubble)
-        print(f'> warmup accept time steps: {warmup_accept}')
+        print(f'> warmup accept time steps: {warmup_accept}', flush=True)
         warmup, _ = Composer.construct(warmup_blks, warmup_devs, ndevs, warmup_peak_mem,
                                        accept=warmup_accept, optimizer=StepOptimalSolver)
+        print(f'> warmup before tighten nsteps: {warmup.nsteps}\n', flush=True)
         warmup.tighten()
         CpuTimer().stop('warmup')
         if warmup is None:
@@ -302,9 +304,10 @@ class Composer:
         cooldown_pre_mem = [memory[devid] - repetend_post_mem[devid] for devid in range(ndevs)]
         cooldown_comp = sum(blk.span * len(blk2devices[blk]) for blk in cooldown_blks) // ndevs
         cooldown_accept = int(cooldown_comp + max_bubble)
-        print(f'> cooldown accept time steps: {cooldown_accept}')
+        print(f'> cooldown accept time steps: {cooldown_accept}', flush=True)
         cooldown, _ = Composer.construct(cooldown_blks, cooldown_devs, micro.ndevs, cooldown_pre_mem,
                                          accept=cooldown_accept, optimizer=StepOptimalSolver)
+        print(f'> cooldown before tighten nsteps: {cooldown.nsteps}\n', flush=True)
         cooldown.tighten()
         CpuTimer().stop('cooldown')
         if cooldown is None:
