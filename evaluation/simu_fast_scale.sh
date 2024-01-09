@@ -2,14 +2,13 @@
 
 export PYTHONPATH=.:$PYTHONPATH
 
-# LOGS=logs/simulator1226
-LOGS=logs/no-flip
+LOGS=logs/scale
 mkdir -p $LOGS
 
 set -x
 
-# premise="kshape mshape nnshape"
-premise="nnshape"
+premise="kshape mshape nnshape"
+# premise="nnshape"
 
 # VShape
 if echo $premise | grep -qw 'vshape'; then
