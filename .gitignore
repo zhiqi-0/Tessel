@@ -1,5 +1,4 @@
 *.o
 *.so
 .vscode
-src/build/
 __pycache__
