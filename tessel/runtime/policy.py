@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from typing import Callable, List, Union, Dict, Tuple
 import more_itertools as mitr
 

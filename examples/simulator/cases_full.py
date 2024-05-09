@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 PYTHONPATH=.:$PYTHONPATH python examples/cases.py \
     --premise vshape --ndevs 4 --nmicros 4 --memory 4
