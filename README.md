@@ -1,6 +1,6 @@
 # Tessel
 
-Tessel is a schedule composer that searches efficient pipeline schedules for various operator placement strategies of large DNN models.
+Tessel is designed for training large models with advanced pipeline schedules. It searches efficient pipeline schedules given by any operator placement strategies of large DNN models.
 
 A large DNN model can be represented by a dataflow graph with operators as nodes and tensors as edges. Each operators can be placed on one arbitrary device or multiple devices (using tensor parallelism). Placing operators on devices generates an operator placement strategy, where input tensors are executed through these operators across multiple devices.
 
@@ -12,7 +12,7 @@ A training or inference iteration (i.e., mini-batch) may involve hundreds or eve
 pip install -e .
 ```
 
-For runtime part, this repo is built on MagicCube of branch `zhiqi/main`.
+For runtime part, this repo depends on nnScaler (https://github.com/microsoft/nnscaler) at branch `main`.
 
 ## Examples
 
@@ -29,11 +29,20 @@ python examples/simulator/cases_tessel.py \
     --save mshape.4stages.sched.json
 ```
 
+Or use `tessel-fast` for the search:
+
+```bash
+python examples/simulator/cases_tessel.py \
+    --placement mshape --ndevs 4 \
+    --memory 6 --fast-search \
+    --save mshape.4stages.sched.json
+```
+
 ## Tutorial
 
 Generating a schedule involves two steps: 1) Specify an operator placememnt strategy; 2) Call `Composer` to search for efficient schedules.
 
-### Step 1: Specify an Operator Placement
+### Step 1: Specify Operator Placement
 
 Tessel uses `Block` to represent a sub-graph of model. The model dataflow graph can be composed by several blocks. Each block can be associated with an execution time (integer), memory (positive or negative integer). Following examples determine a 1F1B-schedule placememnt (V-Shape).
 
@@ -66,6 +75,9 @@ The `sched.add_block_seq` will add blocks into a schedule plan (currently the mi
 
 Then, search for a schedule plan for the vshape placemement:
 
+
+* Use Tessel
+
 ```python
 # maximal peak memory capacity for each device
 memory = 4 
@@ -74,6 +86,30 @@ nmicros = 4
 # search
 schedule = Composer.compose_n(micro, memory, nmicros)
 print(schedule)
+```
+
+* Use Tessel-fast
+
+You can try a significant speedup in search with Tessel-fast.
+
+```python
+wc_ratio = 0.05  # warmup and cooldown ratio to the whole executing time
+schedule = Composer.compose_fast(micro, memory, wc_ratio=(128, 0.05))
+```
+
+## Cite Us
+
+If you find this work helps to your research, please cite with:
+
+```
+@inproceedings{lin2024tessel,
+  title={Tessel: Boosting Distributed Execution of Large DNN Models via Flexible Schedule Search},
+  author={Lin, Zhiqi and Miao, Youshan and Xu, Guanbin and Li, Cheng and Saarikivi, Olli and Maleki, Saeed and Yang, Fan},
+  booktitle={2024 IEEE International Symposium on High-Performance Computer Architecture (HPCA)},
+  pages={803--816},
+  year={2024},
+  organization={IEEE}
+}
 ```
 
 

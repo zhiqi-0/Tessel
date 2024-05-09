@@ -1,10 +1,10 @@
 import setuptools
 
-with open("requirements.txt") as f:
-    install_requires = [
-        line.split("#")[0].strip() for line in f if not line.startswith("#") and line.split("#")[0].strip() != ""
-    ]
-
+install_requires = [
+    'z3-solver',  # tested version: 4.13.0
+    'more_itertools',
+    'matplotlib'
+]
 
 setuptools.setup(
   name=             'tessel',
