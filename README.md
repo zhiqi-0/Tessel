@@ -12,7 +12,7 @@ A training or inference iteration (i.e., mini-batch) may involve hundreds or eve
 pip install -e .
 ```
 
-For runtime part, this repo depends on nnScaler (https://github.com/microsoft/nnscaler) at branch `main`.
+For runtime part, this repo depends on nnScaler (https://github.com/microsoft/nnscaler) at branch `osdi24ae`.
 
 ## Examples
 

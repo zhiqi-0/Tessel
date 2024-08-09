@@ -2,7 +2,7 @@
 import torch
 from functools import partial
 
-from examples.mt5.model import Config, mT5, mT5DataLoader
+from examples.mt5.model import Config, mT5, get_mt5_dataloader
 from examples.mt5.placement import vshape, xshape, nnshape, tp_func
 
 import cube
@@ -10,8 +10,8 @@ from cube.profiler.timer import CudaTimer, print_each_rank
 from cube.profiler.memory import memory_summary
 from cube.runtime.device import DeviceGroup
 
-from tessel.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PAStessel, PASFullTP
-from tessel.config import build_config, build_parser
+from tessel.runtime.policy import PAS1F1B, PAS1F1BPlus, PASChimera, PASTessel, PASFullTP
+from tessel.runtime.config import build_config, build_parser
 
 import argparse
 
@@ -63,7 +63,7 @@ def train():
                                  premise=xshape,
                                  config=config)
     elif args.premise == 'tessel':
-        runtime_policy = partial(PAStessel,
+        runtime_policy = partial(PASTessel,
                                  mbs=args.mbs,
                                  nmicros=args.gbs//args.mbs,
                                  premise=nnshape,
@@ -96,7 +96,7 @@ def train():
         model = model.half() if args.fp16 else model
     else:
         model = None
-    dataloader = mT5DataLoader(args.mbs, cfg)
+    dataloader = get_mt5_dataloader(args.mbs, cfg)
 
     if torch.distributed.get_rank() == 0:
         nparams = 0
@@ -125,6 +125,7 @@ def train():
     print_each_rank(f'loaded model parameter: {nparams}')
 
     CudaTimer(enable=False).warmup()
+    dataloader = iter(dataloader)
     iter_num, warmup = 3, 2
     for step in range(iter_num):
 

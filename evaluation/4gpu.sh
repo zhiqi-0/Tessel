@@ -9,6 +9,7 @@ TOTAL_GPUS=4
 echo $CUDA_VISIBLE_DEVICES
 export PYTHONPATH=.:$PYTHONPATH
 export OMP_NUM_THREADS=4
+export USE_JIT_PARSER=1
 
 GBS=128 # global batch size
 

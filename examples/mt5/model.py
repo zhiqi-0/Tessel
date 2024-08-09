@@ -3,6 +3,7 @@ import cube
 
 from dataclasses import dataclass
 from examples.mt5.blocks import EncoderLayer, DecoderLayer
+from cube.runtime.utils import create_dummy_dataloader
 
 
 @dataclass
@@ -92,44 +93,67 @@ class mT5(torch.nn.Module):
         return loss
         
 
-class mT5DataLoader(cube.runtime.syndata.CubeDataLoader):
+def get_mt5_dataloader(bs: int, cfg: Config):
 
-    def __init__(self, bs: int, cfg: Config):
-        self.cfg = cfg
-        super().__init__(bs, [0] * 4)
-        self.sample = None
-        self.set_batch_size(bs)
+    encoder_input_ids = torch.randint(
+        0, cfg.vocab_size,
+        size=(cfg.seqlen,),
+        dtype=torch.int64, device=torch.cuda.current_device()
+    )
+    encoder_position_ids = torch.arange(
+        0, cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
+    )
+    decoder_input_ids = torch.randint(
+        0, cfg.vocab_size,
+        size=(cfg.seqlen,),
+        dtype=torch.int64, device=torch.cuda.current_device()
+    )
+    decoder_position_ids = torch.arange(
+        0, cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
+    )
+    sample = (encoder_input_ids, encoder_position_ids, decoder_input_ids, decoder_position_ids)
+    return create_dummy_dataloader(sample, bs)
 
-    def __iter__(self):
-        return self
 
-    def __next__(self):
-        return self.sample
-    
-    def set_batch_size(self, bs: int):
-        self.batch_size = bs
-        encoder_input_ids = torch.randint(
-            0, self.cfg.vocab_size,
-            size=(self.batch_size, self.cfg.seqlen),
-            dtype=torch.int64, device=torch.cuda.current_device()
-        )
-        encoder_position_ids = torch.arange(
-            0, self.cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
-        ).repeat(self.batch_size).view(self.batch_size, -1)
-
-        decoder_input_ids = torch.randint(
-            0, self.cfg.vocab_size,
-            size=(self.batch_size, self.cfg.seqlen),
-            dtype=torch.int64, device=torch.cuda.current_device()
-        )
-
-        decoder_position_ids = torch.arange(
-            0, self.cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
-        ).repeat(self.batch_size).view(self.batch_size, -1)
-
-        self.sample = (
-            encoder_input_ids,
-            encoder_position_ids,
-            decoder_input_ids,
-            decoder_position_ids
-        )
+# legacy code
+# class mT5DataLoader(cube.runtime.syndata.CubeDataLoader):
+# 
+#     def __init__(self, bs: int, cfg: Config):
+#         self.cfg = cfg
+#         super().__init__(bs, [0] * 4)
+#         self.sample = None
+#         self.set_batch_size(bs)
+# 
+#     def __iter__(self):
+#         return self
+# 
+#     def __next__(self):
+#         return self.sample
+#     
+#     def set_batch_size(self, bs: int):
+#         self.batch_size = bs
+#         encoder_input_ids = torch.randint(
+#             0, self.cfg.vocab_size,
+#             size=(self.batch_size, self.cfg.seqlen),
+#             dtype=torch.int64, device=torch.cuda.current_device()
+#         )
+#         encoder_position_ids = torch.arange(
+#             0, self.cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
+#         ).repeat(self.batch_size).view(self.batch_size, -1)
+# 
+#         decoder_input_ids = torch.randint(
+#             0, self.cfg.vocab_size,
+#             size=(self.batch_size, self.cfg.seqlen),
+#             dtype=torch.int64, device=torch.cuda.current_device()
+#         )
+# 
+#         decoder_position_ids = torch.arange(
+#             0, self.cfg.seqlen, dtype=torch.int64, device=torch.cuda.current_device()
+#         ).repeat(self.batch_size).view(self.batch_size, -1)
+# 
+#         self.sample = (
+#             encoder_input_ids,
+#             encoder_position_ids,
+#             decoder_input_ids,
+#             decoder_position_ids
+#         )
