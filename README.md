@@ -1,5 +1,7 @@
 # Tessel
 
+_ACK: this repo is forked and modified from (microsoft/nnscaler)[https://github.com/microsoft/nnscaler/tree/osdi24ae] (osdi24ae branch). The repo is updated with Tessel-fast extensions._
+
 Tessel is designed for training large models with advanced pipeline schedules. It searches efficient pipeline schedules given by any operator placement strategies of large DNN models.
 
 A large DNN model can be represented by a dataflow graph with operators as nodes and tensors as edges. Each operators can be placed on one arbitrary device or multiple devices (using tensor parallelism). Placing operators on devices generates an operator placement strategy, where input tensors are executed through these operators across multiple devices.
@@ -94,6 +96,7 @@ You can try a significant speedup in search with Tessel-fast.
 
 ```python
 wc_ratio = 0.05  # warmup and cooldown ratio to the whole executing time
+# 128 means the number of micro-batches
 schedule = Composer.compose_fast(micro, memory, wc_ratio=(128, 0.05))
 ```
 
@@ -101,6 +104,7 @@ schedule = Composer.compose_fast(micro, memory, wc_ratio=(128, 0.05))
 
 If you find this work helps to your research, please cite with:
 
+* Tessel HPCA2024 Paper:
 ```
 @inproceedings{lin2024tessel,
   title={Tessel: Boosting Distributed Execution of Large DNN Models via Flexible Schedule Search},
@@ -109,6 +113,17 @@ If you find this work helps to your research, please cite with:
   pages={803--816},
   year={2024},
   organization={IEEE}
+}
+```
+
+* Tessel-fast (reduced search complexity) TPDS Paper:
+```
+@article{lin2024efficient,
+  title={Efficient Schedule Construction for Distributed Execution of Large DNN Models},
+  author={Lin, Zhiqi and Miao, Youshan and Xu, Guanbin and Li, Cheng and Saarikivi, Olli and Maleki, Saeed and Yang, Fan},
+  journal={IEEE Transactions on Parallel and Distributed Systems},
+  year={2024},
+  publisher={IEEE}
 }
 ```
 
