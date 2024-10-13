@@ -1,6 +1,6 @@
 # Tessel
 
-_ACK: this repo is forked and modified from (microsoft/nnscaler)[https://github.com/microsoft/nnscaler/tree/osdi24ae] (osdi24ae branch). The repo is updated with Tessel-fast extensions._
+_ACK: this repo is forked and modified from [microsoft/nnscaler](https://github.com/microsoft/nnscaler/tree/osdi24ae) (osdi24ae branch). The repo is updated with Tessel-fast extensions._
 
 Tessel is designed for training large models with advanced pipeline schedules. It searches efficient pipeline schedules given by any operator placement strategies of large DNN models.
 
